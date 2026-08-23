@@ -18,6 +18,10 @@
 #include <linux/notifier.h>
 #include <linux/module.h>
 
+#ifdef CONFIG_TOUCHPANEL_OPPO
+extern void touchpanel_enter_aod(void);
+#endif
+
 enum oppo_display_support_list  oppo_display_vendor =
 	OPPO_DISPLAY_UNKNOW;
 static enum oppo_display_power_status oppo_display_status =
@@ -194,6 +198,17 @@ void notifier_oppo_display_status(enum oppo_display_power_status power_status)
 void set_oppo_display_power_status(enum oppo_display_power_status power_status)
 {
 	oppo_display_status = power_status;
+
+	/*
+	 * The normal DRM unblank notification can arrive before the panel enters
+	 * LP1/LP2.  Notify the touchscreen at the actual AOD transition so its
+	 * black-gesture mode is restored after AOD has settled.
+	 */
+#ifdef CONFIG_TOUCHPANEL_OPPO
+	if (power_status == OPPO_DISPLAY_POWER_DOZE ||
+		power_status == OPPO_DISPLAY_POWER_DOZE_SUSPEND)
+		touchpanel_enter_aod();
+#endif
 }
 
 enum oppo_display_power_status get_oppo_display_power_status(void)
@@ -261,5 +276,4 @@ bool is_oppo_display_support_feature(enum oppo_display_feature feature_name)
 
 	return ret;
 }
-
 
