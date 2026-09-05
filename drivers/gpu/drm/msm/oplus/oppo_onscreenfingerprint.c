@@ -186,7 +186,7 @@ static int oppo_get_panel_brightness_to_alpha(void)
 		return oppo_panel_alpha;
 	}
 
-	if (hbm_mode) {
+	if (hbm_mode && !oppo_dimlayer_hbm) {
 		return 0;
 	}
 

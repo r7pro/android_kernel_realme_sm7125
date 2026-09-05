@@ -5416,6 +5416,15 @@ static int sde_crtc_onscreenfinger_atomic_check(struct sde_crtc_state *cstate,
 	bool dimlayer_is_top = false;
 	int i;
 
+	/*
+	 * Primary path: read PLANE_PROP_CUSTOM set by HWC (OPLUS vendor
+	 * binary dispatches PLANE_SET_CUSTOM during its atomic commit).
+	 * Fallback: when AOSP HWC does not set PLANE_PROP_CUSTOM, if multiple
+	 * planes are composed during FOD press (cnt >= 2), the topmost plane
+	 * (highest stage) is the UDFPS illumination overlay. Staging it above
+	 * the inclusive dim layer dims the background UI while the round FOD icon
+	 * shines at full un-dimmed HBM brightness.
+	 */
 	for (i = 0; i < cnt; i++) {
 		mode = sde_plane_check_fingerprint_layer(pstates[i].drm_pstate);
 		if (mode == 1)
@@ -5426,6 +5435,19 @@ static int sde_crtc_onscreenfinger_atomic_check(struct sde_crtc_state *cstate,
 			aod_index = i;
 		if (pstates[i].sde_pstate)
 			pstates[i].sde_pstate->is_skip = false;
+	}
+
+	if (fppressed_index == -1 && dimlayer_hbm && fp_mode && cnt >= 2) {
+		int top_idx = 0;
+		int max_stage = pstates[0].stage;
+
+		for (i = 1; i < cnt; i++) {
+			if (pstates[i].stage > max_stage) {
+				max_stage = pstates[i].stage;
+				top_idx = i;
+			}
+		}
+		fppressed_index = top_idx;
 	}
 
 	if (!is_dsi_panel(cstate->base.crtc))
@@ -5455,8 +5477,8 @@ static int sde_crtc_onscreenfinger_atomic_check(struct sde_crtc_state *cstate,
 	}
 
 	if (fppressed_index >= 0) {
-		if (fp_mode == 0) {
-			pstates[fppressed_index].sde_pstate->is_skip = true;
+		if (!dimlayer_hbm) {
+			// pstates[fppressed_index].sde_pstate->is_skip = true;
 			fppressed_index = -1;
 		}
 	}
@@ -5480,10 +5502,8 @@ static int sde_crtc_onscreenfinger_atomic_check(struct sde_crtc_state *cstate,
 			return 0;
 		}
 
-		if (dimlayer_hbm)
-			cstate->fingerprint_mode = true;
-		else
-			cstate->fingerprint_mode = false;
+		cstate->fingerprint_mode = dimlayer_hbm;
+		cstate->fingerprint_pressed = (fppressed_index >= 0);
 
 		SDE_DEBUG("debug for get cstate->fingerprint_mode = %d\n", cstate->fingerprint_mode);
 

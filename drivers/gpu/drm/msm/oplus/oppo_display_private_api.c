@@ -1956,9 +1956,16 @@ static ssize_t oppo_display_set_dimlayer_hbm(struct device *dev,
 	const char *buf, size_t count)
 {
 	struct dsi_display *display = get_main_display();
-	struct drm_connector *dsi_connector = display->drm_conn;
+	struct drm_connector *dsi_connector;
 	int err = 0;
 	int value = 0;
+
+	if (!display || !display->drm_conn) {
+		pr_err("[%s]: display not ready\n", __func__);
+		return count;
+	}
+
+	dsi_connector = display->drm_conn;
 
 	sscanf(buf, "%d", &value);
 	value = !!value;
@@ -1983,10 +1990,7 @@ static ssize_t oppo_display_set_dimlayer_hbm(struct device *dev,
 		}
 	}
 
-	if (!(get_oppo_display_power_status() == OPPO_DISPLAY_POWER_DOZE ||
-		get_oppo_display_power_status() == OPPO_DISPLAY_POWER_DOZE_SUSPEND)) {
-		oppo_dimlayer_hbm = value;
-	}
+	oppo_dimlayer_hbm = value;
         pr_err("debug for oppo_display_set_dimlayer_hbm get_oppo_display_power_status = %d\n",
 		get_oppo_display_power_status());
 #ifdef VENDOR_EDIT
