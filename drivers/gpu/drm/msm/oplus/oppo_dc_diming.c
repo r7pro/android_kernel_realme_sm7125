@@ -316,7 +316,8 @@ int sde_connector_update_hbm(struct drm_connector *connector)
 
 	fingerprint_mode = sde_crtc_get_fingerprint_mode(c_conn->encoder->crtc->state);
 
-	if (OPPO_DISPLAY_AOD_SCENE == get_oppo_display_scene()) {
+	if (OPPO_DISPLAY_AOD_SCENE == get_oppo_display_scene() ||
+	    OPPO_DISPLAY_AOD_HBM_SCENE == get_oppo_display_scene()) {
 		if (sde_crtc_get_fingerprint_pressed(c_conn->encoder->crtc->state)) {
 			sde_crtc_set_onscreenfinger_defer_sync(c_conn->encoder->crtc->state, true);
 		} else {
@@ -672,7 +673,7 @@ int oppo_display_panel_get_dim_alpha(void *buf) {
 int oppo_display_panel_set_dim_alpha(void *buf) {
 	unsigned int *temp_alpha = buf;
 
-	(*temp_alpha) = oppo_panel_alpha;
+	oppo_panel_alpha = (*temp_alpha);
 
 	return 0;
 }
@@ -690,6 +691,8 @@ int oppo_display_panel_get_dim_dc_alpha(void *buf) {
 		ret = oppo_dc2_alpha;
 	} else if (oppo_underbrightness_alpha != 0) {
 		ret = oppo_underbrightness_alpha;
+	} else if (oppo_dimlayer_bl_enable_v2_real) {
+		ret = 1;
 	} else if (oppo_dimlayer_bl_enable_v3_real) {
 		ret = 1;
 	}

@@ -180,10 +180,9 @@ static int fp_gpio_parse_parent_dts(struct fp_data *fp_data)
         for (fp_id_index = 0; fp_id_index < fp_data->fp_id_amount; fp_id_index++) {
             char fp_gpio_current_node[FP_ID_MAX_LENGTH] = {0};
             snprintf(fp_gpio_current_node, FP_ID_MAX_LENGTH - 1, "%s%d", FP_GPIO_PREFIX_NODE, fp_id_index);
-            dev_info(fp_data->dev, "fp_gpio_current_node: %s\n", fp_gpio_current_node);
             fp_data->gpio_index[fp_id_index] = of_get_named_gpio(np, fp_gpio_current_node, 0);
-            if (fp_data->gpio_index[fp_id_index] < 0) {
-                dev_err(fp_data->dev, "the param %s is not found !\n", fp_gpio_current_node);
+            if (!gpio_is_valid(fp_data->gpio_index[fp_id_index])) {
+                dev_err(fp_data->dev, "the param %s is not found or invalid !\n", fp_gpio_current_node);
                 ret = -FP_ERROR_GENERAL;
                 goto exit;
             }
