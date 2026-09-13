@@ -20,6 +20,12 @@
 
 #ifdef CONFIG_TOUCHPANEL_OPPO
 extern void touchpanel_enter_aod(void);
+
+static void oppo_aod_touchpanel_work_fn(struct work_struct *work)
+{
+	touchpanel_enter_aod();
+}
+static DECLARE_WORK(oppo_aod_tp_work, oppo_aod_touchpanel_work_fn);
 #endif
 
 enum oppo_display_support_list  oppo_display_vendor =
@@ -200,14 +206,25 @@ void set_oppo_display_power_status(enum oppo_display_power_status power_status)
 	oppo_display_status = power_status;
 
 	/*
-	 * The normal DRM unblank notification can arrive before the panel enters
-	 * LP1/LP2.  Notify the touchscreen at the actual AOD transition so its
-	 * black-gesture mode is restored after AOD has settled.
+	 * Defer touchscreen AOD transition to a workqueue so it runs
+	 * outside the DRM atomic commit path.  Calling tp_suspend()
+	 * inline here caused screen freezes on charger connect because
+	 * the heavy I2C work and ts->mutex conflicted with DRM locks.
 	 */
 #ifdef CONFIG_TOUCHPANEL_OPPO
 	if (power_status == OPPO_DISPLAY_POWER_DOZE ||
-		power_status == OPPO_DISPLAY_POWER_DOZE_SUSPEND)
-		touchpanel_enter_aod();
+		power_status == OPPO_DISPLAY_POWER_DOZE_SUSPEND) {
+		schedule_work(&oppo_aod_tp_work);
+	} else {
+		/*
+		 * Display is leaving DOZE — cancel pending AOD work so it
+		 * does not race with tp_resume() and cause slow wakeup.
+		 * cancel_work() is non-blocking: if the work is already
+		 * running, touchpanel_enter_aod() will see the touchscreen
+		 * is no longer suspended and bail out quickly.
+		 */
+		cancel_work(&oppo_aod_tp_work);
+	}
 #endif
 }
 
