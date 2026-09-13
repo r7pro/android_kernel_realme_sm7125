@@ -5797,6 +5797,7 @@ static int sde_crtc_atomic_check(struct drm_crtc *crtc,
 	if (rc)
 		return rc;
 #endif /* OPLUS_FEATURE_AOD_RAMLESS */
+#endif /* OPLUS_BUG_STABILITY */
 
 	/* assign mixer stages based on sorted zpos property */
 	if (cnt > 0)
