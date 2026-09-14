@@ -82,6 +82,9 @@ extern int get_oppo_display_power_status(void);
 #ifndef OPPO_DISPLAY_POWER_OFF
 #define OPPO_DISPLAY_POWER_OFF 0
 #endif
+#ifndef OPPO_DISPLAY_POWER_DOZE_SUSPEND
+#define OPPO_DISPLAY_POWER_DOZE_SUSPEND 3
+#endif
 
 static int SPIDEV_MAJOR;
 
@@ -686,7 +689,8 @@ static int gf_opticalfp_irq_handler(struct fp_underscreen_info *tp_info)
     if (tp_info->touch_state == lasttouchmode) {
         return IRQ_HANDLED;
     }
-    if (gf.fb_black || get_oppo_display_power_status() == OPPO_DISPLAY_POWER_OFF) {
+    if (get_oppo_display_power_status() == OPPO_DISPLAY_POWER_OFF ||
+        get_oppo_display_power_status() == OPPO_DISPLAY_POWER_DOZE_SUSPEND) {
         return IRQ_HANDLED;
     }
     wake_lock_timeout(&fp_wakelock, msecs_to_jiffies(WAKELOCK_HOLD_TIME));

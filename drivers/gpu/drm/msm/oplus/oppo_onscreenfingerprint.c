@@ -174,6 +174,8 @@ static int brightness_to_alpha(int brightness)
 	return alpha;
 }
 
+static int oppo_latched_dim_alpha = 0;
+
 static int oppo_get_panel_brightness_to_alpha(void)
 {
 	struct dsi_display *display = get_main_display();
@@ -192,6 +194,19 @@ static int oppo_get_panel_brightness_to_alpha(void)
 
 	if (!oppo_ffl_trigger_finish) {
 		return brightness_to_alpha(FFL_FP_LEVEL);
+	}
+
+	/*
+	 * When FOD dimlayer_hbm is active, latch the alpha value on the first frame
+	 * of touch so small ambient light sensor fluctuations don't jitter the dimming
+	 * alpha while the user is actively authenticating.
+	 */
+	if (oppo_dimlayer_hbm) {
+		if (!oppo_latched_dim_alpha)
+			oppo_latched_dim_alpha = brightness_to_alpha(display->panel->bl_config.bl_level);
+		return oppo_latched_dim_alpha;
+	} else {
+		oppo_latched_dim_alpha = 0;
 	}
 
 	return brightness_to_alpha(display->panel->bl_config.bl_level);
@@ -598,13 +613,15 @@ int sde_crtc_config_fingerprint_dim_layer(struct drm_crtc_state *crtc_state,
 		return -EINVAL;
 	}
 
-	if ((stage + SDE_STAGE_0) >= kms->catalog->mixer[0].sblk->maxblendstages) {
+	int stage_val = (kms->catalog->has_base_layer) ? stage : (stage + SDE_STAGE_0);
+
+	if (stage_val >= kms->catalog->mixer[0].sblk->maxblendstages) {
 		return -EINVAL;
 	}
 
 	fingerprint_dim_layer = &cstate->dim_layer[cstate->num_dim_layers];
 	fingerprint_dim_layer->flags = SDE_DRM_DIM_LAYER_INCLUSIVE;
-	fingerprint_dim_layer->stage = stage + SDE_STAGE_0;
+	fingerprint_dim_layer->stage = stage_val;
 
 	fingerprint_dim_layer->rect.x = 0;
 	fingerprint_dim_layer->rect.y = 0;

@@ -21,6 +21,7 @@
 #include <linux/debugfs.h>
 #include <linux/ktime.h>
 #include <uapi/drm/sde_drm.h>
+#include <uapi/drm/drm_fourcc.h>
 #include <drm/drm_mode.h>
 #include <drm/drm_crtc.h>
 #include <drm/drm_crtc_helper.h>
@@ -5417,6 +5418,20 @@ static int sde_crtc_onscreenfinger_atomic_check(struct sde_crtc_state *cstate,
 	int i;
 
 	/*
+	 * Disable fingerprint on stationary AOD (DOZE_SUSPEND) and screen-off:
+	 * Video-mode panel gates DSI clock in LP2/DOZE_SUSPEND. Only allow
+	 * fingerprint when awake (POWER_ON) or during pickup pulse (POWER_DOZE).
+	 */
+	if (get_oppo_display_power_status() == OPPO_DISPLAY_POWER_DOZE_SUSPEND ||
+	    get_oppo_display_power_status() == OPPO_DISPLAY_POWER_OFF) {
+		oppo_underbrightness_alpha = 0;
+		cstate->fingerprint_dim_layer = NULL;
+		cstate->fingerprint_mode = false;
+		cstate->fingerprint_pressed = false;
+		return 0;
+	}
+
+	/*
 	 * Primary path: read PLANE_PROP_CUSTOM set by HWC (OPLUS vendor
 	 * binary dispatches PLANE_SET_CUSTOM during its atomic commit).
 	 * Fallback: when AOSP HWC does not set PLANE_PROP_CUSTOM, if multiple
@@ -5437,17 +5452,59 @@ static int sde_crtc_onscreenfinger_atomic_check(struct sde_crtc_state *cstate,
 			pstates[i].sde_pstate->is_skip = false;
 	}
 
-	if (fppressed_index == -1 && dimlayer_hbm && fp_mode && cnt >= 2) {
-		int top_idx = 0;
-		int max_stage = pstates[0].stage;
+	if (fppressed_index == -1 && dimlayer_hbm && fp_mode) {
+		/*
+		 * When PLANE_PROP_CUSTOM is not set by AOSP HWC:
+		 * Search for the UDFPS illumination plane.
+		 * System decoration bars (StatusBar, ScreenDecor, Taskbar)
+		 * are narrow strips (crtc_h <= 150) that do not cover the
+		 * FOD sensor area (540, 2197). They must never be treated as FOD.
+		 * When UDFPS overlay is present, there are at least 2 planes
+		 * covering the FOD sensor area (the underlying App UI/wallpaper
+		 * and the UDFPS overlay on top).
+		 */
+		int best_fod_idx = -1;
+		int max_fod_stage = -1;
+		int fod_plane_count = 0;
+		int sensor_x = 540;
+		int sensor_y = 2197;
 
-		for (i = 1; i < cnt; i++) {
-			if (pstates[i].stage > max_stage) {
-				max_stage = pstates[i].stage;
-				top_idx = i;
+		for (i = 0; i < cnt; i++) {
+			const struct drm_plane_state *p = pstates[i].drm_pstate;
+
+			if (!p || !p->fb)
+				continue;
+
+			/* Exclude narrow status/nav/decor overlays */
+			if (p->crtc_h <= 150)
+				continue;
+
+			/* Check if plane covers the FOD optical sensor location */
+			if (p->crtc_x <= sensor_x && (p->crtc_x + p->crtc_w) >= sensor_x &&
+			    p->crtc_y <= sensor_y && (p->crtc_y + p->crtc_h) >= sensor_y) {
+				fod_plane_count++;
+				if (pstates[i].stage > max_fod_stage) {
+					max_fod_stage = pstates[i].stage;
+					best_fod_idx = i;
+				}
 			}
 		}
-		fppressed_index = top_idx;
+
+		if (fod_plane_count >= 2 && best_fod_idx >= 0) {
+			fppressed_index = best_fod_idx;
+		} else {
+			/*
+			 * If fewer than 2 planes cover the sensor (e.g. Frame 0 before
+			 * SurfaceFlinger composes UDFPS overlay, or single client target):
+			 * Never elevate the App UI above the dim layer!
+			 * Abort cleanly and wait until both layers are present.
+			 */
+			oppo_underbrightness_alpha = 0;
+			cstate->fingerprint_dim_layer = NULL;
+			cstate->fingerprint_mode = false;
+			cstate->fingerprint_pressed = false;
+			return 0;
+		}
 	}
 
 	if (!is_dsi_panel(cstate->base.crtc))
@@ -5502,8 +5559,8 @@ static int sde_crtc_onscreenfinger_atomic_check(struct sde_crtc_state *cstate,
 			return 0;
 		}
 
-		cstate->fingerprint_mode = dimlayer_hbm;
-		cstate->fingerprint_pressed = (fppressed_index >= 0);
+		cstate->fingerprint_mode = (dimlayer_hbm && fp_mode);
+		cstate->fingerprint_pressed = (dimlayer_hbm && fp_mode);
 
 		SDE_DEBUG("debug for get cstate->fingerprint_mode = %d\n", cstate->fingerprint_mode);
 
@@ -5545,21 +5602,22 @@ static int sde_crtc_onscreenfinger_atomic_check(struct sde_crtc_state *cstate,
 		SDE_EVT32(zpos, fp_index, aod_index, fppressed_index, cstate->num_dim_layers);
 		if (sde_crtc_config_fingerprint_dim_layer(&cstate->base, zpos)) {
 			//SDE_ERROR("Failed to config dim layer\n");
-			if (dimlayer_is_top && !cstate->fingerprint_dim_layer) {
-				oppo_underbrightness_alpha = 0;
-				cstate->fingerprint_dim_layer = NULL;
-				cstate->fingerprint_mode = false;
-				cstate->fingerprint_pressed = false;
-				return 0;
+			if (fppressed_index >= 0) {
+				pstates[fppressed_index].stage--;
 			}
-			SDE_EVT32(zpos, fp_index, aod_index, fppressed_index, cstate->num_dim_layers);
-			return -EINVAL;
+			oppo_underbrightness_alpha = 0;
+			cstate->fingerprint_dim_layer = NULL;
+			cstate->fingerprint_mode = false;
+			cstate->fingerprint_pressed = false;
+			return 0;
 		}
+
 #ifdef OPLUS_FEATURE_AOD_RAMLESS
 // Yuwei.Zhang@MULTIMEDIA.DISPLAY.LCD, 2020/09/25, sepolicy for aod ramless
-		if (fppressed_index >= 0 && !(is_oppo_aod_ramless() && cstate->base.mode.flags & DRM_MODE_FLAG_CMD_MODE_PANEL))
+		if (fppressed_index >= 0 && (dimlayer_hbm && fp_mode) &&
+		    !(is_oppo_aod_ramless() && (cstate->base.mode.flags & DRM_MODE_FLAG_CMD_MODE_PANEL)))
 #else
-		if (fppressed_index >= 0)
+		if (fppressed_index >= 0 && (dimlayer_hbm && fp_mode))
 #endif /* OPLUS_FEATURE_AOD_RAMLESS */
 			cstate->fingerprint_pressed = true;
 		else
@@ -5783,11 +5841,8 @@ static int sde_crtc_atomic_check(struct drm_crtc *crtc,
 	if (rc)
 		return rc;
 #endif /* OPLUS_FEATURE_AOD_RAMLESS */
-
-	rc = sde_crtc_onscreenfinger_atomic_check(cstate, pstates, cnt);
-	if (rc)
-		goto end;
 #endif /* OPLUS_BUG_STABILITY */
+
 	/* assign mixer stages based on sorted zpos property */
 	if (cnt > 0)
 		sort(pstates, cnt, sizeof(pstates[0]), pstate_cmp, NULL);
@@ -5807,6 +5862,15 @@ static int sde_crtc_atomic_check(struct drm_crtc *crtc,
 			pstates[i].stage = z_pos;
 		}
 	}
+
+#ifdef OPLUS_BUG_STABILITY
+/* Sachin Shukla@PSW.MM.Display.Service.Feature,2018/11/21
+ * For OnScreenFingerprint feature
+*/
+	rc = sde_crtc_onscreenfinger_atomic_check(cstate, pstates, cnt);
+	if (rc)
+		goto end;
+#endif /* OPLUS_BUG_STABILITY */
 
 	z_pos = -1;
 	for (i = 0; i < cnt; i++) {
