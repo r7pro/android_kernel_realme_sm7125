@@ -5434,11 +5434,6 @@ static int sde_crtc_onscreenfinger_atomic_check(struct sde_crtc_state *cstate,
 	/*
 	 * Primary path: read PLANE_PROP_CUSTOM set by HWC (OPLUS vendor
 	 * binary dispatches PLANE_SET_CUSTOM during its atomic commit).
-	 * Fallback: when AOSP HWC does not set PLANE_PROP_CUSTOM, if multiple
-	 * planes are composed during FOD press (cnt >= 2), the topmost plane
-	 * (highest stage) is the UDFPS illumination overlay. Staging it above
-	 * the inclusive dim layer dims the background UI while the round FOD icon
-	 * shines at full un-dimmed HBM brightness.
 	 */
 	for (i = 0; i < cnt; i++) {
 		mode = sde_plane_check_fingerprint_layer(pstates[i].drm_pstate);
@@ -5452,27 +5447,31 @@ static int sde_crtc_onscreenfinger_atomic_check(struct sde_crtc_state *cstate,
 			pstates[i].sde_pstate->is_skip = false;
 	}
 
-	if (fppressed_index == -1 && dimlayer_hbm && fp_mode) {
-		/*
-		 * When PLANE_PROP_CUSTOM is not set by AOSP HWC:
-		 * Search for the UDFPS illumination plane.
-		 * System decoration bars (StatusBar, ScreenDecor, Taskbar)
-		 * are narrow strips (crtc_h <= 150) that do not cover the
-		 * FOD sensor area (540, 2197). They must never be treated as FOD.
-		 * Bottom-sheet dialogs / popups (e.g. BiometricPrompt dialog)
-		 * have crtc_y > 300, crtc_w > 500, but do NOT span the full screen
-		 * height (crtc_h < 2200). They must NEVER be treated as the FOD plane!
-		 * When UDFPS overlay is present, there are at least 2 non-dialog
-		 * planes covering the FOD sensor area (the underlying App UI/wallpaper
-		 * and the UDFPS overlay on top).
-		 */
+	if (fppressed_index == -1 && dimlayer_hbm && fp_mode && cnt >= 2) {
 		int best_fod_idx = -1;
 		int max_fod_stage = -1;
-		int fod_plane_count = 0;
 		int sensor_x = 540;
 		int sensor_y = 2197;
 
-		for (i = 0; i < cnt; i++) {
+		/*
+		 * When PLANE_PROP_CUSTOM is not set by AOSP HWC:
+		 * Search for the UDFPS illumination plane among overlay planes (i >= 1).
+		 * Base plane 0 is always the background App UI / wallpaper and must never
+		 * be promoted.
+		 *
+		 * System decoration bars (StatusBar, ScreenDecor, Taskbar)
+		 * are narrow strips (crtc_h <= 150) that do not cover the
+		 * FOD sensor area (540, 2197). They must never be treated as FOD.
+		 *
+		 * Bottom-sheet dialogs / popups (e.g. BiometricPrompt in Settings and Play Store)
+		 * have crtc_y > 300, crtc_w > 500, but do NOT span the full screen
+		 * height (crtc_h < 2200). They must NEVER be treated as the FOD plane!
+		 *
+		 * Only the true UDFPS illumination overlay (i >= 1) is selected and staged
+		 * above the inclusive dim layer, so the round FOD icon shines at full HBM
+		 * while apps, wallpapers, and dialog cards stay smoothly dimmed.
+		 */
+		for (i = 1; i < cnt; i++) {
 			const struct drm_plane_state *p = pstates[i].drm_pstate;
 
 			if (!p || !p->fb)
@@ -5489,7 +5488,6 @@ static int sde_crtc_onscreenfinger_atomic_check(struct sde_crtc_state *cstate,
 			/* Check if plane covers the FOD optical sensor location */
 			if (p->crtc_x <= sensor_x && (p->crtc_x + p->crtc_w) >= sensor_x &&
 			    p->crtc_y <= sensor_y && (p->crtc_y + p->crtc_h) >= sensor_y) {
-				fod_plane_count++;
 				if (pstates[i].stage > max_fod_stage) {
 					max_fod_stage = pstates[i].stage;
 					best_fod_idx = i;
@@ -5497,17 +5495,15 @@ static int sde_crtc_onscreenfinger_atomic_check(struct sde_crtc_state *cstate,
 			}
 		}
 
-		if (fod_plane_count >= 2 && best_fod_idx >= 0) {
+		if (best_fod_idx >= 1) {
 			fppressed_index = best_fod_idx;
 		}
 		/*
-		 * If fewer than 2 candidate planes cover the sensor (e.g. Frame 0
-		 * before SurfaceFlinger composes UDFPS overlay, or single client target):
+		 * If no candidate overlay plane covers the sensor (e.g. Frame 0
+		 * before SurfaceFlinger renders the UDFPS overlay, or single client target):
 		 * Leave fppressed_index = -1 so the inclusive dim layer covers all
 		 * background planes (dimlayer_is_top = true), smoothly dimming the screen
 		 * so neither app nor popup ever flashes full HBM.
-		 * Do NOT abort with fingerprint_mode = false, which would kill enrollment
-		 * and touch hold!
 		 */
 	}
 
