@@ -5406,6 +5406,7 @@ extern bool is_oppo_aod_ramless(void);
 static int sde_crtc_onscreenfinger_atomic_check(struct sde_crtc_state *cstate,
 		struct plane_state *pstates, int cnt)
 {
+	struct sde_kms *kms;
 	int fp_index = -1;
 	int fppressed_index = -1;
 	int aod_index = -1;
@@ -5510,6 +5511,8 @@ static int sde_crtc_onscreenfinger_atomic_check(struct sde_crtc_state *cstate,
 	if (!is_dsi_panel(cstate->base.crtc))
 		return 0;
 
+	kms = _sde_crtc_get_kms(cstate->base.crtc);
+
 	if (oppo_dimlayer_bl_enable) {
 		int backlight = oppo_get_panel_brightness();
 
@@ -5600,9 +5603,11 @@ static int sde_crtc_onscreenfinger_atomic_check(struct sde_crtc_state *cstate,
 			}
 			zpos++;
 
-			max_stage_allowed = kms->catalog->mixer[0].sblk->maxblendstages - 1 - SDE_STAGE_0;
-			if (zpos > max_stage_allowed)
-				zpos = max_stage_allowed;
+			if (kms && kms->catalog && kms->catalog->mixer_count) {
+				max_stage_allowed = kms->catalog->mixer[0].sblk->maxblendstages - 1 - SDE_STAGE_0;
+				if (zpos > max_stage_allowed)
+					zpos = max_stage_allowed;
+			}
 		}
 
 		SDE_EVT32(zpos, fp_index, aod_index, fppressed_index, cstate->num_dim_layers);

@@ -598,6 +598,7 @@ int sde_crtc_config_fingerprint_dim_layer(struct drm_crtc_state *crtc_state,
 	struct sde_hw_dim_layer *fingerprint_dim_layer;
 	int alpha = oppo_get_panel_brightness_to_alpha();
 	struct sde_kms *kms;
+	int stage_val;
 
 	kms = _sde_crtc_get_kms_(crtc_state->crtc);
 
@@ -613,7 +614,7 @@ int sde_crtc_config_fingerprint_dim_layer(struct drm_crtc_state *crtc_state,
 		return -EINVAL;
 	}
 
-	int stage_val = (kms->catalog->has_base_layer) ? stage : (stage + SDE_STAGE_0);
+	stage_val = (kms->catalog->has_base_layer) ? stage : (stage + SDE_STAGE_0);
 
 	if (stage_val < SDE_STAGE_0)
 		stage_val = SDE_STAGE_0;

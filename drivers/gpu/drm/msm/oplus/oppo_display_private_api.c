@@ -2185,14 +2185,6 @@ static ssize_t oppo_display_notify_fp_press(struct device *dev,
 	int vblank_get = -EINVAL;
 	int err = 0;
 	bool if_con = false;
-#ifdef OPLUS_FEATURE_AOD_RAMLESS
-/* Yuwei.Zhang@MULTIMEDIA.DISPLAY.LCD, 2020/09/25, sepolicy for aod ramless */
-	struct drm_display_mode *cmd_mode = NULL;
-	struct drm_display_mode *vid_mode = NULL;
-	struct drm_display_mode *mode = NULL;
-	struct drm_display_mode *cur_mode = NULL;
-	bool mode_changed = false;
-#endif /* OPLUS_FEATURE_AOD_RAMLESS */
 
 	if (!dsi_connector || !dsi_connector->state || !dsi_connector->state->crtc) {
 		pr_err("[%s]: display not ready\n", __func__);
