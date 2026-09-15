@@ -441,11 +441,13 @@ int sde_connector_update_hbm(struct drm_connector *connector)
 				return 0;
 			}
 
-			current_vblank = drm_crtc_vblank_count(crtc);
+			if (dsi_display->config.panel_mode != DSI_OP_VIDEO_MODE) {
+				current_vblank = drm_crtc_vblank_count(crtc);
 
-			ret = wait_event_timeout(*drm_crtc_vblank_waitqueue(crtc),
-					current_vblank != drm_crtc_vblank_count(crtc),
-					msecs_to_jiffies(17));
+				ret = wait_event_timeout(*drm_crtc_vblank_waitqueue(crtc),
+						current_vblank != drm_crtc_vblank_count(crtc),
+						msecs_to_jiffies(17));
+			}
 
 			if(!dsi_display->panel->oppo_priv.prj_flag) {
 				oppo_skip_datadimming_sync = true;

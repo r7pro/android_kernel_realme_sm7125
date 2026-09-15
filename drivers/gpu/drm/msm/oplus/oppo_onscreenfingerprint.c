@@ -615,6 +615,9 @@ int sde_crtc_config_fingerprint_dim_layer(struct drm_crtc_state *crtc_state,
 
 	int stage_val = (kms->catalog->has_base_layer) ? stage : (stage + SDE_STAGE_0);
 
+	if (stage_val < SDE_STAGE_0)
+		stage_val = SDE_STAGE_0;
+
 	if (stage_val >= kms->catalog->mixer[0].sblk->maxblendstages) {
 		return -EINVAL;
 	}

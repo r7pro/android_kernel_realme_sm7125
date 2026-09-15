@@ -5459,8 +5459,11 @@ static int sde_crtc_onscreenfinger_atomic_check(struct sde_crtc_state *cstate,
 		 * System decoration bars (StatusBar, ScreenDecor, Taskbar)
 		 * are narrow strips (crtc_h <= 150) that do not cover the
 		 * FOD sensor area (540, 2197). They must never be treated as FOD.
-		 * When UDFPS overlay is present, there are at least 2 planes
-		 * covering the FOD sensor area (the underlying App UI/wallpaper
+		 * Bottom-sheet dialogs / popups (e.g. BiometricPrompt dialog)
+		 * have crtc_y > 300, crtc_w > 500, but do NOT span the full screen
+		 * height (crtc_h < 2200). They must NEVER be treated as the FOD plane!
+		 * When UDFPS overlay is present, there are at least 2 non-dialog
+		 * planes covering the FOD sensor area (the underlying App UI/wallpaper
 		 * and the UDFPS overlay on top).
 		 */
 		int best_fod_idx = -1;
@@ -5479,6 +5482,10 @@ static int sde_crtc_onscreenfinger_atomic_check(struct sde_crtc_state *cstate,
 			if (p->crtc_h <= 150)
 				continue;
 
+			/* Exclude bottom-sheet dialogs / popups (e.g. BiometricPrompt) */
+			if (p->crtc_y > 300 && p->crtc_w > 500 && p->crtc_h < 2200)
+				continue;
+
 			/* Check if plane covers the FOD optical sensor location */
 			if (p->crtc_x <= sensor_x && (p->crtc_x + p->crtc_w) >= sensor_x &&
 			    p->crtc_y <= sensor_y && (p->crtc_y + p->crtc_h) >= sensor_y) {
@@ -5492,19 +5499,16 @@ static int sde_crtc_onscreenfinger_atomic_check(struct sde_crtc_state *cstate,
 
 		if (fod_plane_count >= 2 && best_fod_idx >= 0) {
 			fppressed_index = best_fod_idx;
-		} else {
-			/*
-			 * If fewer than 2 planes cover the sensor (e.g. Frame 0 before
-			 * SurfaceFlinger composes UDFPS overlay, or single client target):
-			 * Never elevate the App UI above the dim layer!
-			 * Abort cleanly and wait until both layers are present.
-			 */
-			oppo_underbrightness_alpha = 0;
-			cstate->fingerprint_dim_layer = NULL;
-			cstate->fingerprint_mode = false;
-			cstate->fingerprint_pressed = false;
-			return 0;
 		}
+		/*
+		 * If fewer than 2 candidate planes cover the sensor (e.g. Frame 0
+		 * before SurfaceFlinger composes UDFPS overlay, or single client target):
+		 * Leave fppressed_index = -1 so the inclusive dim layer covers all
+		 * background planes (dimlayer_is_top = true), smoothly dimming the screen
+		 * so neither app nor popup ever flashes full HBM.
+		 * Do NOT abort with fingerprint_mode = false, which would kill enrollment
+		 * and touch hold!
+		 */
 	}
 
 	if (!is_dsi_panel(cstate->base.crtc))
@@ -5590,6 +5594,8 @@ static int sde_crtc_onscreenfinger_atomic_check(struct sde_crtc_state *cstate,
 		}
 
 		if (zpos == INT_MAX) {
+			int max_stage_allowed;
+
 			zpos = 0;
 			dimlayer_is_top = true;
 			for (i = 0; i < cnt; i++) {
@@ -5597,6 +5603,10 @@ static int sde_crtc_onscreenfinger_atomic_check(struct sde_crtc_state *cstate,
 					zpos = pstates[i].stage;
 			}
 			zpos++;
+
+			max_stage_allowed = kms->catalog->mixer[0].sblk->maxblendstages - 1 - SDE_STAGE_0;
+			if (zpos > max_stage_allowed)
+				zpos = max_stage_allowed;
 		}
 
 		SDE_EVT32(zpos, fp_index, aod_index, fppressed_index, cstate->num_dim_layers);
@@ -5614,10 +5624,10 @@ static int sde_crtc_onscreenfinger_atomic_check(struct sde_crtc_state *cstate,
 
 #ifdef OPLUS_FEATURE_AOD_RAMLESS
 // Yuwei.Zhang@MULTIMEDIA.DISPLAY.LCD, 2020/09/25, sepolicy for aod ramless
-		if (fppressed_index >= 0 && (dimlayer_hbm && fp_mode) &&
+		if ((dimlayer_hbm && fp_mode) &&
 		    !(is_oppo_aod_ramless() && (cstate->base.mode.flags & DRM_MODE_FLAG_CMD_MODE_PANEL)))
 #else
-		if (fppressed_index >= 0 && (dimlayer_hbm && fp_mode))
+		if (dimlayer_hbm && fp_mode)
 #endif /* OPLUS_FEATURE_AOD_RAMLESS */
 			cstate->fingerprint_pressed = true;
 		else
