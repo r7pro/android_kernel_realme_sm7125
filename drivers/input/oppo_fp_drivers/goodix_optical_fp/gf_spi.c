@@ -78,6 +78,11 @@
 struct fp_underscreen_info fp_tpinfo;
 static unsigned int lasttouchmode = 0;
 
+extern int get_oppo_display_power_status(void);
+#ifndef OPPO_DISPLAY_POWER_OFF
+#define OPPO_DISPLAY_POWER_OFF 0
+#endif
+
 static int SPIDEV_MAJOR;
 
 static DECLARE_BITMAP(minors, N_SPI_MINORS);
@@ -627,38 +632,34 @@ static int goodix_fb_state_chg_callback(struct notifier_block *nb,
         return retval;
     }
 
-    if (evdata && evdata->data && val == FB_EARLY_EVENT_BLANK && gf_dev) {
+    if (evdata && evdata->data && (val == FB_EARLY_EVENT_BLANK || val == MSM_DRM_EARLY_EVENT_BLANK) && gf_dev) {
         blank = *(int *)(evdata->data);
-        switch (blank) {
-            case FB_BLANK_POWERDOWN:
-                if (gf_dev->device_available == 1) {
-                    gf_dev->fb_black = 1;
+        if (blank == MSM_DRM_BLANK_POWERDOWN || blank == FB_BLANK_POWERDOWN) {
+            if (gf_dev->device_available == 1) {
+                gf_dev->fb_black = 1;
 #if defined(GF_NETLINK_ENABLE)
-                    msg = GF_NET_EVENT_FB_BLACK;
-                    sendnlmsg(&msg);
+                msg = GF_NET_EVENT_FB_BLACK;
+                sendnlmsg(&msg);
 #elif defined (GF_FASYNC)
-                    if (gf_dev->async) {
-                        kill_fasync(&gf_dev->async, SIGIO, POLL_IN);
-                    }
-#endif
+                if (gf_dev->async) {
+                    kill_fasync(&gf_dev->async, SIGIO, POLL_IN);
                 }
-                break;
-            case FB_BLANK_UNBLANK:
-                if (gf_dev->device_available == 1) {
-                    gf_dev->fb_black = 0;
+#endif
+            }
+        } else if (blank == MSM_DRM_BLANK_UNBLANK || blank == FB_BLANK_UNBLANK) {
+            if (gf_dev->device_available == 1) {
+                gf_dev->fb_black = 0;
 #if defined(GF_NETLINK_ENABLE)
-                    msg = GF_NET_EVENT_FB_UNBLACK;
-                    sendnlmsg(&msg);
+                msg = GF_NET_EVENT_FB_UNBLACK;
+                sendnlmsg(&msg);
 #elif defined (GF_FASYNC)
-                    if (gf_dev->async) {
-                        kill_fasync(&gf_dev->async, SIGIO, POLL_IN);
-                    }
-#endif
+                if (gf_dev->async) {
+                    kill_fasync(&gf_dev->async, SIGIO, POLL_IN);
                 }
-                break;
-            default:
-                pr_info("%s defalut\n", __func__);
-                break;
+#endif
+            }
+        } else {
+            pr_info("%s defalut\n", __func__);
         }
     }
     return NOTIFY_OK;
@@ -672,7 +673,10 @@ static int gf_opticalfp_irq_handler(struct fp_underscreen_info *tp_info)
 {
     char msg = 0;
     fp_tpinfo = *tp_info;
-    if(tp_info->touch_state== lasttouchmode){
+    if (tp_info->touch_state == lasttouchmode) {
+        return IRQ_HANDLED;
+    }
+    if (get_oppo_display_power_status() == OPPO_DISPLAY_POWER_OFF) {
         return IRQ_HANDLED;
     }
     wake_lock_timeout(&fp_wakelock, msecs_to_jiffies(WAKELOCK_HOLD_TIME));

@@ -1509,6 +1509,9 @@ static void sec_enable_fingerprint_mode(void *chip_data, uint32_t enable)
             if (ret == 1)
                 break;
         }
+        if (ret == 1) {
+            touch_i2c_write_block(chip_info->client, SEC_CMD_SENSE_ON, 0, NULL);
+        }
     } else if (enable == 0) {
         ret = touch_i2c_read_byte(chip_info->client, SEC_CMD_TOUCHHOLD_SWITCH);
         ret &= 0xFE;
