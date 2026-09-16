@@ -186,7 +186,7 @@ static int oppo_get_panel_brightness_to_alpha(void)
 		return oppo_panel_alpha;
 	}
 
-	if (hbm_mode) {
+	if (hbm_mode && !oppo_dimlayer_hbm) {
 		return 0;
 	}
 
@@ -598,7 +598,7 @@ int sde_crtc_config_fingerprint_dim_layer(struct drm_crtc_state *crtc_state,
 		return -EINVAL;
 	}
 
-	if ((stage + SDE_STAGE_0) >= kms->catalog->mixer[0].sblk->maxblendstages) {
+	if ((stage + SDE_STAGE_0) > kms->catalog->mixer[0].sblk->maxblendstages) {
 		return -EINVAL;
 	}
 

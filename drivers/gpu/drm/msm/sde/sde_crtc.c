@@ -21,6 +21,7 @@
 #include <linux/debugfs.h>
 #include <linux/ktime.h>
 #include <uapi/drm/sde_drm.h>
+#include <uapi/drm/drm_fourcc.h>
 #include <drm/drm_mode.h>
 #include <drm/drm_crtc.h>
 #include <drm/drm_crtc_helper.h>
@@ -5428,6 +5429,55 @@ static int sde_crtc_onscreenfinger_atomic_check(struct sde_crtc_state *cstate,
 			pstates[i].sde_pstate->is_skip = false;
 	}
 
+	if (fppressed_index == -1 && dimlayer_hbm && fp_mode && cnt >= 2) {
+		/*
+		 * When PLANE_PROP_CUSTOM is not set by AOSP HWC:
+		 * Search for the UDFPS illumination plane.
+		 * System decoration bars (StatusBar, ScreenDecor, Taskbar)
+		 * are narrow strips (crtc_h <= 150) that do not cover the
+		 * FOD sensor area (540, 2197). They must never be treated as FOD.
+		 * A full-screen window (app or lockscreen) is never the FOD
+		 * illumination overlay.
+		 */
+		int best_fod_idx = -1;
+		int max_fod_stage = -1;
+		int sensor_x = 540;
+		int sensor_y = 2197;
+
+		for (i = 0; i < cnt; i++) {
+			const struct drm_plane_state *p = pstates[i].drm_pstate;
+
+			if (!p || !p->fb)
+				continue;
+
+			/*
+			 * Exclude compressed planes: app windows, lockscreen UI,
+			 * and BiometricPrompt popups all use Qualcomm UBWC compression.
+			 * Only UdfpsControllerOverlay is uncompressed linear.
+			 */
+			if (p->fb->modifier & DRM_FORMAT_MOD_QCOM_COMPRESSED)
+				continue;
+
+			/* Must cover the physical FOD optical sensor location */
+			if (p->crtc_x > sensor_x || (p->crtc_x + p->crtc_w) < sensor_x ||
+			    p->crtc_y > sensor_y || (p->crtc_y + p->crtc_h) < sensor_y)
+				continue;
+
+			/* Exclude narrow status/nav/decor overlays */
+			if (p->crtc_h <= 150)
+				continue;
+
+			if (pstates[i].stage > max_fod_stage) {
+				max_fod_stage = pstates[i].stage;
+				best_fod_idx = i;
+			}
+		}
+
+		if (best_fod_idx >= 0) {
+			fppressed_index = best_fod_idx;
+		}
+	}
+
 	if (!is_dsi_panel(cstate->base.crtc))
 		return 0;
 
@@ -5455,8 +5505,8 @@ static int sde_crtc_onscreenfinger_atomic_check(struct sde_crtc_state *cstate,
 	}
 
 	if (fppressed_index >= 0) {
-		if (fp_mode == 0) {
-			pstates[fppressed_index].sde_pstate->is_skip = true;
+		if (!dimlayer_hbm) {
+			// pstates[fppressed_index].sde_pstate->is_skip = true;
 			fppressed_index = -1;
 		}
 	}
@@ -5480,10 +5530,7 @@ static int sde_crtc_onscreenfinger_atomic_check(struct sde_crtc_state *cstate,
 			return 0;
 		}
 
-		if (dimlayer_hbm)
-			cstate->fingerprint_mode = true;
-		else
-			cstate->fingerprint_mode = false;
+		cstate->fingerprint_mode = (dimlayer_hbm && fp_mode);
 
 		SDE_DEBUG("debug for get cstate->fingerprint_mode = %d\n", cstate->fingerprint_mode);
 
@@ -5524,16 +5571,11 @@ static int sde_crtc_onscreenfinger_atomic_check(struct sde_crtc_state *cstate,
 
 		SDE_EVT32(zpos, fp_index, aod_index, fppressed_index, cstate->num_dim_layers);
 		if (sde_crtc_config_fingerprint_dim_layer(&cstate->base, zpos)) {
-			//SDE_ERROR("Failed to config dim layer\n");
-			if (dimlayer_is_top && !cstate->fingerprint_dim_layer) {
-				oppo_underbrightness_alpha = 0;
-				cstate->fingerprint_dim_layer = NULL;
-				cstate->fingerprint_mode = false;
-				cstate->fingerprint_pressed = false;
-				return 0;
-			}
-			SDE_EVT32(zpos, fp_index, aod_index, fppressed_index, cstate->num_dim_layers);
-			return -EINVAL;
+			oppo_underbrightness_alpha = 0;
+			cstate->fingerprint_dim_layer = NULL;
+			cstate->fingerprint_mode = false;
+			cstate->fingerprint_pressed = false;
+			return 0;
 		}
 #ifdef OPLUS_FEATURE_AOD_RAMLESS
 // Yuwei.Zhang@MULTIMEDIA.DISPLAY.LCD, 2020/09/25, sepolicy for aod ramless
@@ -5763,10 +5805,6 @@ static int sde_crtc_atomic_check(struct drm_crtc *crtc,
 	if (rc)
 		return rc;
 #endif /* OPLUS_FEATURE_AOD_RAMLESS */
-
-	rc = sde_crtc_onscreenfinger_atomic_check(cstate, pstates, cnt);
-	if (rc)
-		goto end;
 #endif /* OPLUS_BUG_STABILITY */
 	/* assign mixer stages based on sorted zpos property */
 	if (cnt > 0)
@@ -5787,6 +5825,15 @@ static int sde_crtc_atomic_check(struct drm_crtc *crtc,
 			pstates[i].stage = z_pos;
 		}
 	}
+
+#ifdef OPLUS_BUG_STABILITY
+/* Sachin Shukla@PSW.MM.Display.Service.Feature,2018/11/21
+ * For OnScreenFingerprint feature
+*/
+	rc = sde_crtc_onscreenfinger_atomic_check(cstate, pstates, cnt);
+	if (rc)
+		goto end;
+#endif /* OPLUS_BUG_STABILITY */
 
 	z_pos = -1;
 	for (i = 0; i < cnt; i++) {
