@@ -5429,52 +5429,56 @@ static int sde_crtc_onscreenfinger_atomic_check(struct sde_crtc_state *cstate,
 			pstates[i].sde_pstate->is_skip = false;
 	}
 
-	if (fppressed_index == -1 && dimlayer_hbm && fp_mode && cnt >= 2) {
-		/*
-		 * When PLANE_PROP_CUSTOM is not set by AOSP HWC:
-		 * Search for the UDFPS illumination plane.
-		 * System decoration bars (StatusBar, ScreenDecor, Taskbar)
-		 * are narrow strips (crtc_h <= 150) that do not cover the
-		 * FOD sensor area (540, 2197). They must never be treated as FOD.
-		 * A full-screen window (app or lockscreen) is never the FOD
-		 * illumination overlay.
-		 */
-		int best_fod_idx = -1;
-		int max_fod_stage = -1;
-		int sensor_x = 540;
-		int sensor_y = 2197;
+	/*
+	 * Track previous commit's fingerprint_pressed state to prevent
+	 * premature clearing during transient frames.
+	 */
+	bool was_pressed = false;
+	if (cstate->base.crtc && cstate->base.crtc->state)
+		was_pressed = to_sde_crtc_state(cstate->base.crtc->state)->fingerprint_pressed;
 
+	/*
+	 * Track the active FOD overlay plane ID across commits during a touch.
+	 * Reset when finger is lifted (!dimlayer_hbm || !fp_mode).
+	 */
+	static uint32_t saved_fod_plane_id = 0;
+	static const int sensor_x = 540;
+	static const int sensor_y = 2197;
+
+	if (!dimlayer_hbm || !fp_mode)
+		saved_fod_plane_id = 0;
+
+	/*
+	 * Fallback FOD plane detection for AOSP:
+	 * AOSP HWC does not set PLANE_PROP_CUSTOM, so fppressed_index is -1.
+	 * When the finger is pressed (dimlayer_hbm && fp_mode), locate the UDFPS
+	 * illumination layer. Once identified, lock onto saved_fod_plane_id so
+	 * intermediate animation frames in Settings/Play Store never lose the plane.
+	 */
+	if (fppressed_index == -1 && dimlayer_hbm && fp_mode && cnt >= 2) {
 		for (i = 0; i < cnt; i++) {
 			const struct drm_plane_state *p = pstates[i].drm_pstate;
 
-			if (!p || !p->fb)
+			if (!p || !p->fb || !p->plane)
 				continue;
 
-			/*
-			 * Exclude compressed planes: app windows, lockscreen UI,
-			 * and BiometricPrompt popups all use Qualcomm UBWC compression.
-			 * Only UdfpsControllerOverlay is uncompressed linear.
-			 */
-			if (p->fb->modifier & DRM_FORMAT_MOD_QCOM_COMPRESSED)
-				continue;
-
-			/* Must cover the physical FOD optical sensor location */
-			if (p->crtc_x > sensor_x || (p->crtc_x + p->crtc_w) < sensor_x ||
-			    p->crtc_y > sensor_y || (p->crtc_y + p->crtc_h) < sensor_y)
-				continue;
-
-			/* Exclude narrow status/nav/decor overlays */
-			if (p->crtc_h <= 150)
-				continue;
-
-			if (pstates[i].stage > max_fod_stage) {
-				max_fod_stage = pstates[i].stage;
-				best_fod_idx = i;
+			/* Retain previously identified FOD plane across the entire touch */
+			if (saved_fod_plane_id && p->plane->base.id == saved_fod_plane_id) {
+				fppressed_index = i;
+				break;
 			}
-		}
 
-		if (best_fod_idx >= 0) {
-			fppressed_index = best_fod_idx;
+			/* Identify UdfpsControllerOverlay: uncompressed linear buffer over sensor */
+			bool is_fod_overlay = !(p->fb->modifier & DRM_FORMAT_MOD_QCOM_COMPRESSED) &&
+					      p->crtc_h > 150 &&
+					      p->crtc_x <= sensor_x && (p->crtc_x + p->crtc_w) >= sensor_x &&
+					      p->crtc_y <= sensor_y && (p->crtc_y + p->crtc_h) >= sensor_y;
+
+			if (is_fod_overlay) {
+				fppressed_index = i;
+				saved_fod_plane_id = p->plane->base.id;
+				break;
+			}
 		}
 	}
 
@@ -5583,6 +5587,8 @@ static int sde_crtc_onscreenfinger_atomic_check(struct sde_crtc_state *cstate,
 #else
 		if (fppressed_index >= 0)
 #endif /* OPLUS_FEATURE_AOD_RAMLESS */
+			cstate->fingerprint_pressed = true;
+		else if (was_pressed && dimlayer_hbm && fp_mode)
 			cstate->fingerprint_pressed = true;
 		else
 			cstate->fingerprint_pressed = false;
