@@ -5564,13 +5564,25 @@ static int sde_crtc_onscreenfinger_atomic_check(struct sde_crtc_state *cstate,
 		}
 
 		if (zpos == INT_MAX) {
-			zpos = 0;
-			dimlayer_is_top = true;
-			for (i = 0; i < cnt; i++) {
-				if (pstates[i].stage > zpos)
-					zpos = pstates[i].stage;
+			if (dimlayer_bl) {
+				zpos = 0;
+				dimlayer_is_top = true;
+				for (i = 0; i < cnt; i++) {
+					if (pstates[i].stage > zpos)
+						zpos = pstates[i].stage;
+				}
+				zpos++;
+			} else {
+				/*
+				 * No FOD layer on screen (e.g. auth failed or overlay removed).
+				 * Do not dim the entire display when only dimlayer_hbm was requested.
+				 */
+				oppo_underbrightness_alpha = 0;
+				cstate->fingerprint_dim_layer = NULL;
+				cstate->fingerprint_mode = false;
+				cstate->fingerprint_pressed = false;
+				return 0;
 			}
-			zpos++;
 		}
 
 		SDE_EVT32(zpos, fp_index, aod_index, fppressed_index, cstate->num_dim_layers);
