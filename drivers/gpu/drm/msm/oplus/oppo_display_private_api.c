@@ -2663,17 +2663,15 @@ int dsi_display_oppo_set_power(struct drm_connector *connector,
 		notifier_data.id = 0;
 		msm_drm_notifier_call_chain(MSM_DRM_EARLY_EVENT_BLANK,
 					   &notifier_data);
-		if(OPPO_DISPLAY_AOD_SCENE == get_oppo_display_scene()) {
+		if (OPPO_DISPLAY_AOD_SCENE == get_oppo_display_scene()) {
+			/* Always exit AOD low-power mode (NOLP) immediately on wakeup to normal scene */
+			rc = dsi_panel_set_nolp(display->panel);
 			if (sde_connector_get_fp_mode(connector)) {
 				mutex_lock(&display->panel->panel_lock);
 				rc = dsi_panel_tx_cmd_set(display->panel, DSI_CMD_AOD_HBM_ON);
 				mutex_unlock(&display->panel->panel_lock);
-				set_oppo_display_scene(OPPO_DISPLAY_AOD_HBM_SCENE);
-
-			} else {
-				rc = dsi_panel_set_nolp(display->panel);
-				set_oppo_display_scene(OPPO_DISPLAY_NORMAL_SCENE);
 			}
+			set_oppo_display_scene(OPPO_DISPLAY_NORMAL_SCENE);
 		}
 
 		oppo_dsi_update_seed_mode();

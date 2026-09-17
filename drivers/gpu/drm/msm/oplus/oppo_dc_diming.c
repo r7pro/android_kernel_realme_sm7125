@@ -491,6 +491,19 @@ int sde_connector_update_hbm(struct drm_connector *connector)
 					}
 #endif /* OPLUS_FEATURE_AOD_RAMLESS */
 				}
+				/*
+				 * If display power is ON, exit panel low-power mode (NOLP)
+				 * and transition to normal scene so panel doesn't freeze in LP2.
+				 */
+				if (get_oppo_display_power_status() == OPPO_DISPLAY_POWER_ON) {
+					rc = dsi_panel_tx_cmd_set(dsi_display->panel, DSI_CMD_SET_NOLP);
+					if(panel->bl_config.bl_level > 1023)
+						oppo_panel_update_backlight_unlock(panel);
+					if (oppo_display_get_hbm_mode()) {
+						rc = dsi_panel_tx_cmd_set(dsi_display->panel, DSI_CMD_AOD_HBM_ON);
+					}
+					set_oppo_display_scene(OPPO_DISPLAY_NORMAL_SCENE);
+				}
 			} else {
 				rc = dsi_panel_tx_cmd_set(dsi_display->panel, DSI_CMD_HBM_OFF);
 				if(set_bl_off) {

@@ -2893,7 +2893,13 @@ retry:
 			}
 		}
 
-		if (lp != SDE_MODE_DPMS_LP2) {
+		/*
+		 * In State 2 AOD mode (Display.STATE_ON), the display stays ON
+		 * (conn->dpms == DRM_MODE_DPMS_ON) during autosuspend without using
+		 * hardware LP1/LP2. Match LP2 behavior and keep CRTC active,
+		 * avoiding CRTC teardown and full modeset freeze upon wakeup.
+		 */
+		if (lp != SDE_MODE_DPMS_LP2 && conn->dpms != DRM_MODE_DPMS_ON) {
 			/* force CRTC to be inactive */
 			crtc_state = drm_atomic_get_crtc_state(state,
 					conn->state->crtc);
