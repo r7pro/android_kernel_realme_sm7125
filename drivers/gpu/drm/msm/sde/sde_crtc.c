@@ -5430,55 +5430,44 @@ static int sde_crtc_onscreenfinger_atomic_check(struct sde_crtc_state *cstate,
 	}
 
 	/*
-	 * Track previous commit's fingerprint_pressed state to prevent
-	 * premature clearing during transient frames.
-	 */
-	bool was_pressed = false;
-	if (cstate->base.crtc && cstate->base.crtc->state)
-		was_pressed = to_sde_crtc_state(cstate->base.crtc->state)->fingerprint_pressed;
-
-	/*
-	 * Track the active FOD overlay plane ID across commits during a touch.
-	 * Reset when finger is lifted (!dimlayer_hbm || !fp_mode).
-	 */
-	static uint32_t saved_fod_plane_id = 0;
-	static const int sensor_x = 540;
-	static const int sensor_y = 2197;
-
-	if (!dimlayer_hbm || !fp_mode)
-		saved_fod_plane_id = 0;
-
-	/*
 	 * Fallback FOD plane detection for AOSP:
 	 * AOSP HWC does not set PLANE_PROP_CUSTOM, so fppressed_index is -1.
 	 * When the finger is pressed (dimlayer_hbm && fp_mode), locate the UDFPS
-	 * illumination layer. Once identified, lock onto saved_fod_plane_id so
-	 * intermediate animation frames in Settings/Play Store never lose the plane.
+	 * illumination layer. Pick the matching plane with the highest stage.
 	 */
 	if (fppressed_index == -1 && dimlayer_hbm && fp_mode && cnt >= 2) {
+		int best_fod_idx = -1;
+		int max_fod_stage = -1;
+		static const int sensor_x = 540;
+		static const int sensor_y = 2197;
+
 		for (i = 0; i < cnt; i++) {
 			const struct drm_plane_state *p = pstates[i].drm_pstate;
 
-			if (!p || !p->fb || !p->plane)
+			if (!p || !p->fb)
 				continue;
 
-			/* Retain previously identified FOD plane across the entire touch */
-			if (saved_fod_plane_id && p->plane->base.id == saved_fod_plane_id) {
-				fppressed_index = i;
-				break;
-			}
+			/* Exclude compressed planes (apps, wallpaper, dialogs use UBWC) */
+			if (p->fb->modifier & DRM_FORMAT_MOD_QCOM_COMPRESSED)
+				continue;
 
-			/* Identify UdfpsControllerOverlay: uncompressed linear buffer over sensor */
-			bool is_fod_overlay = !(p->fb->modifier & DRM_FORMAT_MOD_QCOM_COMPRESSED) &&
-					      p->crtc_h > 150 &&
-					      p->crtc_x <= sensor_x && (p->crtc_x + p->crtc_w) >= sensor_x &&
-					      p->crtc_y <= sensor_y && (p->crtc_y + p->crtc_h) >= sensor_y;
+			/* Exclude narrow status/nav/decor overlays */
+			if (p->crtc_h <= 150)
+				continue;
 
-			if (is_fod_overlay) {
-				fppressed_index = i;
-				saved_fod_plane_id = p->plane->base.id;
-				break;
+			/* Must cover the physical FOD optical sensor location */
+			if (p->crtc_x > sensor_x || (p->crtc_x + p->crtc_w) < sensor_x ||
+			    p->crtc_y > sensor_y || (p->crtc_y + p->crtc_h) < sensor_y)
+				continue;
+
+			if (pstates[i].stage > max_fod_stage) {
+				max_fod_stage = pstates[i].stage;
+				best_fod_idx = i;
 			}
+		}
+
+		if (best_fod_idx >= 0) {
+			fppressed_index = best_fod_idx;
 		}
 	}
 
@@ -5576,11 +5565,12 @@ static int sde_crtc_onscreenfinger_atomic_check(struct sde_crtc_state *cstate,
 				/*
 				 * No FOD layer on screen (e.g. auth failed or overlay removed).
 				 * Do not dim the entire display when only dimlayer_hbm was requested.
+				 * Keep panel HBM and pressed state active while finger is touching.
 				 */
 				oppo_underbrightness_alpha = 0;
 				cstate->fingerprint_dim_layer = NULL;
-				cstate->fingerprint_mode = false;
-				cstate->fingerprint_pressed = false;
+				cstate->fingerprint_mode = (dimlayer_hbm && fp_mode);
+				cstate->fingerprint_pressed = (dimlayer_hbm && fp_mode);
 				return 0;
 			}
 		}
@@ -5589,8 +5579,9 @@ static int sde_crtc_onscreenfinger_atomic_check(struct sde_crtc_state *cstate,
 		if (sde_crtc_config_fingerprint_dim_layer(&cstate->base, zpos)) {
 			oppo_underbrightness_alpha = 0;
 			cstate->fingerprint_dim_layer = NULL;
-			cstate->fingerprint_mode = false;
-			cstate->fingerprint_pressed = false;
+			/* Blend stages full; cannot insert dim layer, but keep HBM active! */
+			cstate->fingerprint_mode = (dimlayer_hbm && fp_mode);
+			cstate->fingerprint_pressed = (dimlayer_hbm && fp_mode);
 			return 0;
 		}
 #ifdef OPLUS_FEATURE_AOD_RAMLESS
@@ -5600,10 +5591,8 @@ static int sde_crtc_onscreenfinger_atomic_check(struct sde_crtc_state *cstate,
 		if (fppressed_index >= 0)
 #endif /* OPLUS_FEATURE_AOD_RAMLESS */
 			cstate->fingerprint_pressed = true;
-		else if (was_pressed && dimlayer_hbm && fp_mode)
-			cstate->fingerprint_pressed = true;
 		else
-			cstate->fingerprint_pressed = false;
+			cstate->fingerprint_pressed = (dimlayer_hbm && fp_mode);
 
 		SDE_DEBUG("debug for get cstate->fingerprint_pressed = %d\n", cstate->fingerprint_pressed);
 	} else {
