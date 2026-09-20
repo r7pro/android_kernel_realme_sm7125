@@ -5429,6 +5429,15 @@ static int sde_crtc_onscreenfinger_atomic_check(struct sde_crtc_state *cstate,
 			pstates[i].sde_pstate->is_skip = false;
 	}
 
+	/*
+	 * Track previous commit's fingerprint_pressed state to prevent
+	 * premature clearing during transient frames.
+	 */
+	bool was_pressed = false;
+	if (cstate->base.crtc && cstate->base.crtc->state)
+		was_pressed = to_sde_crtc_state(cstate->base.crtc->state)->fingerprint_pressed;
+
+
 	if (fppressed_index == -1 && dimlayer_hbm && fp_mode && cnt >= 2) {
 		/*
 		 * When PLANE_PROP_CUSTOM is not set by AOSP HWC:
@@ -5583,6 +5592,8 @@ static int sde_crtc_onscreenfinger_atomic_check(struct sde_crtc_state *cstate,
 #else
 		if (fppressed_index >= 0)
 #endif /* OPLUS_FEATURE_AOD_RAMLESS */
+			cstate->fingerprint_pressed = true;
+		else if (was_pressed && dimlayer_hbm && fp_mode)
 			cstate->fingerprint_pressed = true;
 		else
 			cstate->fingerprint_pressed = false;
