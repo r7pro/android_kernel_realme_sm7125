@@ -2232,6 +2232,15 @@ static ssize_t oppo_display_notify_fp_press(struct device *dev,
 	}
 
 	oppo_onscreenfp_status = onscreenfp_status;
+
+	{
+		struct msm_drm_notifier notifier_data;
+		int blank = onscreenfp_status;
+		notifier_data.id = MSM_DRM_PRIMARY_DISPLAY;
+		notifier_data.data = &blank;
+		msm_drm_notifier_call_chain(MSM_DRM_ONSCREENFINGERPRINT_EVENT,
+				&notifier_data);
+	}
 #ifdef OPLUS_FEATURE_AOD_RAMLESS
 /* Yuwei.Zhang@MULTIMEDIA.DISPLAY.LCD, 2020/09/25, sepolicy for aod ramless */
 	if((0==oppo_display_mode) && onscreenfp_status) {

@@ -5537,9 +5537,9 @@ static int sde_crtc_onscreenfinger_atomic_check(struct sde_crtc_state *cstate,
 		}
 #ifdef OPLUS_FEATURE_AOD_RAMLESS
 // Yuwei.Zhang@MULTIMEDIA.DISPLAY.LCD, 2020/09/25, sepolicy for aod ramless
-		if (fppressed_index >= 0 && !(is_oppo_aod_ramless() && cstate->base.mode.flags & DRM_MODE_FLAG_CMD_MODE_PANEL))
+		if ((fppressed_index >= 0 || fp_mode) && !(is_oppo_aod_ramless() && cstate->base.mode.flags & DRM_MODE_FLAG_CMD_MODE_PANEL))
 #else
-		if (fppressed_index >= 0)
+		if (fppressed_index >= 0 || fp_mode)
 #endif /* OPLUS_FEATURE_AOD_RAMLESS */
 			cstate->fingerprint_pressed = true;
 		else
@@ -5550,7 +5550,7 @@ static int sde_crtc_onscreenfinger_atomic_check(struct sde_crtc_state *cstate,
 		oppo_underbrightness_alpha = 0;
 		cstate->fingerprint_dim_layer = NULL;
 		cstate->fingerprint_mode = false;
-		cstate->fingerprint_pressed = false;
+		cstate->fingerprint_pressed = (fp_mode != 0);
 	}
 	SDE_EVT32(cstate->fingerprint_dim_layer);
 
