@@ -2290,7 +2290,13 @@ static ssize_t oppo_display_notify_fp_press(struct device *dev,
 	}
 #endif /* OPLUS_FEATURE_AOD_RAMLESS */
 
-	if (OPPO_DISPLAY_AOD_SCENE == get_oppo_display_scene()) {
+	/*
+	 * Commit every press-state transition.  On normal-screen UDFPS this
+	 * publishes fingerprint_pressed (and therefore the PCC bypass) before the
+	 * sensor samples; restricting this to AOD leaves the first press after a
+	 * quick relock using stale state.
+	 */
+	{
 		drm_modeset_lock_all(drm_dev);
 
 		state = drm_atomic_state_alloc(drm_dev);
