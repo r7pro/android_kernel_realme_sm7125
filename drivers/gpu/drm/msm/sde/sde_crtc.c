@@ -5537,9 +5537,9 @@ static int sde_crtc_onscreenfinger_atomic_check(struct sde_crtc_state *cstate,
 		}
 #ifdef OPLUS_FEATURE_AOD_RAMLESS
 // Yuwei.Zhang@MULTIMEDIA.DISPLAY.LCD, 2020/09/25, sepolicy for aod ramless
-		if (fppressed_index >= 0)
+		if (fppressed_index >= 0 || (dimlayer_hbm && fp_mode))
 #else
-		if (fppressed_index >= 0)
+		if (fppressed_index >= 0 || (dimlayer_hbm && fp_mode))
 #endif /* OPLUS_FEATURE_AOD_RAMLESS */
 			cstate->fingerprint_pressed = true;
 		else
