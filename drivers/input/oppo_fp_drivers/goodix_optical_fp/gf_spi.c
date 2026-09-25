@@ -59,10 +59,6 @@
 #define VER_MINOR   2
 #define PATCH_LEVEL 9
 
-#ifndef MSM_DRM_ONSCREENFINGERPRINT_EVENT
-#define MSM_DRM_ONSCREENFINGERPRINT_EVENT 0x10
-#endif
-
 #define WAKELOCK_HOLD_TIME 500 /* in ms */
 #define SENDCMD_WAKELOCK_HOLD_TIME 1000 /* in ms */
 
@@ -614,6 +610,8 @@ static int goodix_fb_state_chg_callback(struct notifier_block *nb,
         switch (op_mode) {
             case 0:
                 pr_info("[%s] UI disappear\n", __func__);
+                msg = GF_NET_EVENT_UI_DISAPPEAR;
+                sendnlmsg(&msg);
                 break;
             case 1:
                 pr_info("[%s] UI ready \n", __func__);
