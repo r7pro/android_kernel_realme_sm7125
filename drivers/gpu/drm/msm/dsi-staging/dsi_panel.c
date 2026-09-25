@@ -4636,10 +4636,26 @@ int dsi_panel_set_nolp(struct dsi_panel *panel)
 		pr_err("[%s] failed to send DSI_CMD_SET_NOLP cmd, rc=%d\n",
 		       panel->name, rc);
 
+#ifdef OPLUS_FEATURE_AOD_RAMLESS
+/* RMX2170: For ramless video-mode panels the AOD state is pseudo-CMD mode
+ * via POMS.  NOLP must also fire the cmd-to-video post-switch sequence
+ * (curve settings, 11-bit dimming, DISPLAY ON 29h) to cleanly transition
+ * the panel back to video mode.  Without this, the panel exits AOD in a
+ * partially-initialized state and produces a white/black flicker frame.
+ */
+	if (panel->oppo_priv.is_aod_ramless) {
+		int nolp_rc = dsi_panel_tx_cmd_set(panel,
+				DSI_CMD_SET_POST_CMD_TO_VID_SWITCH);
+		if (nolp_rc)
+			pr_err("[%s] failed cmd-to-vid post-switch on NOLP, rc=%d\n",
+			       panel->name, nolp_rc);
+	}
+#endif /* OPLUS_FEATURE_AOD_RAMLESS */
+
 #ifdef OPLUS_BUG_STABILITY
 /* Sachin Shukla@PSW.MM.Display.LCD.Stability,2018/11/21
  * Set and save display status
-*/
+ */
 	set_oppo_display_power_status(OPPO_DISPLAY_POWER_ON);
 #endif /* OPLUS_BUG_STABILITY */
 exit:

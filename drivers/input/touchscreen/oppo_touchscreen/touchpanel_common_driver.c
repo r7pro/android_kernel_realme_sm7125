@@ -185,6 +185,9 @@ void operate_mode_switch(struct touchpanel_data *ts)
                     ts->ts_ops->enable_fingerprint(ts->chip_data, !!ts->fp_enable);
                 if (((ts->gesture_enable & 0x01) != 1) && ts->ts_ops->enable_gesture_mask)
                     ts->ts_ops->enable_gesture_mask(ts->chip_data, 0);
+                else if (ts->ts_ops->enable_gesture_mask)
+                    ts->ts_ops->enable_gesture_mask(ts->chip_data, 1);
+
             } else {
                 ts->ts_ops->mode_switch(ts->chip_data, MODE_GESTURE, false);
                 if (ts->mode_switch_type == SEQUENCE)
@@ -549,21 +552,53 @@ static void tp_gesture_handle(struct touchpanel_data *ts)
             input_sync(ts->input_dev);
         }
     } else if (gesture_info_temp.gesture_type == FingerprintDown) {
-        ts->fp_info.touch_state = 1;
-        if (ts->screenoff_fingerprint_info_support) {
-            ts->fp_info.x = gesture_info_temp.Point_start.x;
-            ts->fp_info.y = gesture_info_temp.Point_start.y;
+        int fp_x = gesture_info_temp.Point_start.x;
+        int fp_y = gesture_info_temp.Point_start.y;
+        if (!fp_x && !fp_y) {
+            fp_x = 540;
+            fp_y = 2197;
         }
+        ts->fp_info.touch_state = 1;
+        ts->fp_info.x = fp_x;
+        ts->fp_info.y = fp_y;
         opticalfp_irq_handler(&ts->fp_info);
         notify_display_fpd(true);
-    } else if (gesture_info_temp.gesture_type == FingerprintUp) {
-        ts->fp_info.touch_state = 0;
-        if (ts->screenoff_fingerprint_info_support) {
-            ts->fp_info.x = gesture_info_temp.Point_start.x;
-            ts->fp_info.y = gesture_info_temp.Point_start.y;
+
+        if (ts->input_dev) {
+            input_mt_slot(ts->input_dev, 0);
+            input_mt_report_slot_state(ts->input_dev, MT_TOOL_FINGER, 1);
+            input_report_key(ts->input_dev, BTN_TOUCH, 1);
+            input_report_key(ts->input_dev, BTN_TOOL_FINGER, 1);
+            input_report_abs(ts->input_dev, ABS_MT_POSITION_X, fp_x);
+            input_report_abs(ts->input_dev, ABS_MT_POSITION_Y, fp_y);
+            input_report_key(ts->input_dev, KEY_GESTURE_FP_DOWN, 1);
+            input_sync(ts->input_dev);
+            input_report_key(ts->input_dev, KEY_GESTURE_FP_DOWN, 0);
+            input_sync(ts->input_dev);
         }
+    } else if (gesture_info_temp.gesture_type == FingerprintUp) {
+        int fp_x = gesture_info_temp.Point_start.x;
+        int fp_y = gesture_info_temp.Point_start.y;
+        if (!fp_x && !fp_y) {
+            fp_x = 540;
+            fp_y = 2197;
+        }
+        ts->fp_info.touch_state = 0;
+        ts->fp_info.x = fp_x;
+        ts->fp_info.y = fp_y;
         opticalfp_irq_handler(&ts->fp_info);
         notify_display_fpd(false);
+
+        if (ts->input_dev) {
+            input_mt_slot(ts->input_dev, 0);
+            input_mt_report_slot_state(ts->input_dev, MT_TOOL_FINGER, 0);
+            input_report_key(ts->input_dev, BTN_TOUCH, 0);
+            input_report_key(ts->input_dev, BTN_TOOL_FINGER, 0);
+            input_report_key(ts->input_dev, KEY_GESTURE_FP_UP, 1);
+            input_sync(ts->input_dev);
+            input_report_key(ts->input_dev, KEY_GESTURE_FP_UP, 0);
+            input_sync(ts->input_dev);
+        }
     }
 }
 
@@ -5356,6 +5391,8 @@ static int init_input_device(struct touchpanel_data *ts)
         set_bit(KEY_GESTURE_SWIPE_RIGHT, ts->input_dev->keybit);
         set_bit(KEY_GESTURE_SWIPE_UP, ts->input_dev->keybit);
         set_bit(KEY_GESTURE_SINGLE_TAP, ts->input_dev->keybit);
+        set_bit(KEY_GESTURE_FP_DOWN, ts->input_dev->keybit);
+        set_bit(KEY_GESTURE_FP_UP, ts->input_dev->keybit);
     }
 
     ts->kpd_input_dev->name = TPD_DEVICE"_kpd";
@@ -6763,7 +6800,14 @@ void touchpanel_enter_aod(void)
 {
     struct touchpanel_data *ts = g_tp;
 
-    if (!ts || !ts->black_gesture_support || !(ts->gesture_enable & 0x01))
+    /*
+     * RMX2170: Keep touch IC armed for optical FP even when DT2W is
+     * disabled.  The original check bailed out when gesture_enable==0,
+     * leaving the FOD detection disarmed in AOD.  We must only skip if
+     * BOTH double-tap-to-wake AND fingerprint-under-display are off.
+     */
+    if (!ts || !ts->black_gesture_support ||
+            (!(ts->gesture_enable & 0x01) && !ts->fp_enable))
         return;
 
     if (ts->is_suspended) {

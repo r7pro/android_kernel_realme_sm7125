@@ -5537,7 +5537,7 @@ static int sde_crtc_onscreenfinger_atomic_check(struct sde_crtc_state *cstate,
 		}
 #ifdef OPLUS_FEATURE_AOD_RAMLESS
 // Yuwei.Zhang@MULTIMEDIA.DISPLAY.LCD, 2020/09/25, sepolicy for aod ramless
-		if (fppressed_index >= 0 && !(is_oppo_aod_ramless() && cstate->base.mode.flags & DRM_MODE_FLAG_CMD_MODE_PANEL))
+		if (fppressed_index >= 0)
 #else
 		if (fppressed_index >= 0)
 #endif /* OPLUS_FEATURE_AOD_RAMLESS */

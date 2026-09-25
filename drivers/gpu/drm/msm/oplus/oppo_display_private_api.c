@@ -1983,12 +1983,7 @@ static ssize_t oppo_display_set_dimlayer_hbm(struct device *dev,
 		}
 	}
 
-	if (!(get_oppo_display_power_status() == OPPO_DISPLAY_POWER_DOZE ||
-		get_oppo_display_power_status() == OPPO_DISPLAY_POWER_DOZE_SUSPEND)) {
-		oppo_dimlayer_hbm = value;
-	}
-        pr_err("debug for oppo_display_set_dimlayer_hbm get_oppo_display_power_status = %d\n",
-		get_oppo_display_power_status());
+	oppo_dimlayer_hbm = value;
 #ifdef VENDOR_EDIT
 	/* Hu Jie@PSW.MM.Display.Lcd.Stability, 2019-09-27, add log at display key evevnt */
 	pr_err("debug for oppo_display_set_dimlayer_hbm set oppo_dimlayer_hbm = %d\n",
@@ -2163,7 +2158,7 @@ int oppo_display_atomic_check(struct drm_crtc *crtc, struct drm_crtc_state *stat
 	if (display && display->panel &&
 	    display->panel->oppo_priv.is_aod_ramless &&
 	    is_oppo_display_aod_mode() &&
-	    (crtc->state->mode.flags | DRM_MODE_FLAG_CMD_MODE_PANEL)) {
+	    (crtc->state->mode.flags & DRM_MODE_FLAG_CMD_MODE_PANEL)) {
 		wait_event_timeout(oppo_aod_wait, !is_oppo_display_aod_mode(),
 				   msecs_to_jiffies(100));
 	}
@@ -3081,10 +3076,17 @@ static ssize_t oppo_display_set_video(struct device *dev,
 		return count;
 	}
 
-	if(atomic_read(&aod_onscreenfp_status) &&
-			((OPPO_DISPLAY_POWER_DOZE==power_stat) ||
-			 (OPPO_DISPLAY_POWER_DOZE_SUSPEND==power_stat))) {
-		pr_info("%s, drop this set_video\n", __func__);
+	/*
+	 * RMX2170: The original code dropped every set_video call while the
+	 * FP was pressed in DOZE/DOZE_SUSPEND.  This also blocked the restore
+	 * path (mode_id==1 = back to video) after UDFPS auth completes.
+	 * Only drop the CMD→VIDEO transition (mode_id==0) to avoid re-
+	 * triggering the AOD-entry sequence while the FP press is active.
+	 */
+	if (atomic_read(&aod_onscreenfp_status) && (mode_id == 0) &&
+			((OPPO_DISPLAY_POWER_DOZE == power_stat) ||
+			 (OPPO_DISPLAY_POWER_DOZE_SUSPEND == power_stat))) {
+		pr_info("%s, drop cmd set_video (fp active in doze)\n", __func__);
 		return count;
 	}
 
@@ -3105,52 +3107,70 @@ static ssize_t oppo_display_set_video(struct device *dev,
 	if (!state)
 		goto error;
 
-	oppo_display_mode = mode_id;
-	atomic_set(&aod_onscreenfp_status, (1==mode_id) ? 0 : oppo_onscreenfp_status);
-	state->acquire_ctx = mode_config->acquire_ctx;
-	crtc = dsi_connector->state->crtc;
-	crtc_state = drm_atomic_get_crtc_state(state, crtc);
-	cur_mode = &crtc->state->mode;
+	/*
+	 * RMX2170: Save previous mode so we can restore on commit failure.
+	 * The original code set oppo_display_mode BEFORE the commit succeeded.
+	 * On charger-connect the DRM wakeup path holds modeset locks, causing
+	 * the commit to fail, leaving oppo_display_mode == 0 (CMD/AOD) while
+	 * the panel is actually in video mode.  This desynchronised the mode
+	 * variable and caused the AOD clock to freeze on the last shown state.
+	 */
+	{
+		int prev_display_mode = oppo_display_mode;
+		oppo_display_mode = mode_id;
+		atomic_set(&aod_onscreenfp_status, (1==mode_id) ? 0 : oppo_onscreenfp_status);
+		state->acquire_ctx = mode_config->acquire_ctx;
+		crtc = dsi_connector->state->crtc;
+		crtc_state = drm_atomic_get_crtc_state(state, crtc);
+		cur_mode = &crtc->state->mode;
 
-	 {
-		struct drm_display_mode *set_mode = NULL;
-		struct drm_display_mode *cmd_mode = NULL;
-		struct drm_display_mode *vid_mode = NULL;
+		 {
+			struct drm_display_mode *set_mode = NULL;
+			struct drm_display_mode *cmd_mode = NULL;
+			struct drm_display_mode *vid_mode = NULL;
 
-		list_for_each_entry(mode, &dsi_connector->modes, head) {
-			if (drm_mode_vrefresh(mode) == 0)
-				continue;
-			if (mode->clock != cur_mode->clock)
-				continue;
-			if (mode->flags & DRM_MODE_FLAG_VID_MODE_PANEL)
-				vid_mode = mode;
-			if (mode->flags & DRM_MODE_FLAG_CMD_MODE_PANEL)
-				cmd_mode = mode;
-		}
-
-		set_mode = oppo_display_mode ? vid_mode : cmd_mode;
-		set_mode = oppo_onscreenfp_status ? vid_mode : set_mode;
-
-		if (set_mode && drm_mode_vrefresh(set_mode) != drm_mode_vrefresh(&crtc_state->mode)) {
-			mode_changed = true;
-		} else {
-			mode_changed = false;
-		}
-
-		if (mode_changed) {
-			for (i = 0; i < priv->num_crtcs; i++) {
-				if (priv->disp_thread[i].crtc_id == crtc->base.id) {
-					if (priv->disp_thread[i].thread)
-						kthread_flush_worker(&priv->disp_thread[i].worker);
-				}
+			list_for_each_entry(mode, &dsi_connector->modes, head) {
+				if (drm_mode_vrefresh(mode) == 0)
+					continue;
+				if (mode->clock != cur_mode->clock)
+					continue;
+				if (mode->flags & DRM_MODE_FLAG_VID_MODE_PANEL)
+					vid_mode = mode;
+				if (mode->flags & DRM_MODE_FLAG_CMD_MODE_PANEL)
+					cmd_mode = mode;
 			}
 
-			display->panel->dyn_clk_caps.dyn_clk_support = false;
-			drm_atomic_set_mode_for_crtc(crtc_state, set_mode);
+			set_mode = oppo_display_mode ? vid_mode : cmd_mode;
+			set_mode = oppo_onscreenfp_status ? vid_mode : set_mode;
+
+			if (set_mode && drm_mode_vrefresh(set_mode) != drm_mode_vrefresh(&crtc_state->mode)) {
+				mode_changed = true;
+			} else {
+				mode_changed = false;
+			}
+
+			if (mode_changed) {
+				for (i = 0; i < priv->num_crtcs; i++) {
+					if (priv->disp_thread[i].crtc_id == crtc->base.id) {
+						if (priv->disp_thread[i].thread)
+							kthread_flush_worker(&priv->disp_thread[i].worker);
+					}
+				}
+
+				display->panel->dyn_clk_caps.dyn_clk_support = false;
+				drm_atomic_set_mode_for_crtc(crtc_state, set_mode);
+			}
+			wake_up(&oppo_aod_wait);
 		}
-		wake_up(&oppo_aod_wait);
+		err = drm_atomic_commit(state);
+
+		/* Restore mode variable if commit failed to keep state consistent */
+		if (err) {
+			pr_err("%s: drm_atomic_commit failed rc=%d, restoring oppo_display_mode=%d\n",
+			       __func__, err, prev_display_mode);
+			oppo_display_mode = prev_display_mode;
+		}
 	}
-	err = drm_atomic_commit(state);
 	drm_atomic_state_put(state);
 
 	if (mode_changed) {

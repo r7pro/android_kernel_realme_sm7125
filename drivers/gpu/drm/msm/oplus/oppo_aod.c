@@ -70,8 +70,16 @@ int oppo_update_aod_light_mode(void)
 		return -EFAULT;
 	}
 	mutex_lock(&display->display_lock);
-	/* enable the clk vote for CMD mode panels */
-	if (display->config.panel_mode == DSI_OP_CMD_MODE) {
+	/*
+	 * RMX2170: Enable DSI core clocks before sending the AOD brightness
+	 * command.  The upstream code only did this for CMD-mode panels, but
+	 * our panel is a ramless VIDEO-mode panel (is_aod_ramless) that
+	 * switches to pseudo-CMD via POMS.  Without the clock vote the
+	 * command transmission was unreliable and clocks were never released,
+	 * causing continuous high-frequency clock rail power during AOD.
+	 */
+	if (display->config.panel_mode == DSI_OP_CMD_MODE ||
+			(display->panel->oppo_priv.is_aod_ramless)) {
 		dsi_display_clk_ctrl(display->dsi_clk_handle,
 			DSI_CORE_CLK, DSI_CLK_ON);
 	}
@@ -106,6 +114,15 @@ error:
 	if (display->config.panel_mode == DSI_OP_CMD_MODE) {
 		dsi_display_clk_ctrl(display->dsi_clk_handle,
 			DSI_ALL_CLKS, DSI_CLK_OFF);
+	} else if (display->panel->oppo_priv.is_aod_ramless) {
+		/*
+		 * RMX2170: Only release the core clock vote for ramless panels.
+		 * DSI_ALL_CLKS includes pixel/link clocks which must stay alive
+		 * during AOD or the display freezes (clock stops updating).
+		 * We only enabled DSI_CORE_CLK above, so only release that.
+		 */
+		dsi_display_clk_ctrl(display->dsi_clk_handle,
+			DSI_CORE_CLK, DSI_CLK_OFF);
 	}
 	mutex_unlock(&display->display_lock);
 
@@ -193,8 +210,9 @@ int dsi_display_aod_on(struct dsi_display *display) {
 
 	mutex_lock(&display->display_lock);
 
-		/* enable the clk vote for CMD mode panels */
-	if (display->config.panel_mode == DSI_OP_CMD_MODE) {
+	/* RMX2170: gate clocks for both CMD and ramless VIDEO panels */
+	if (display->config.panel_mode == DSI_OP_CMD_MODE ||
+			display->panel->oppo_priv.is_aod_ramless) {
 		dsi_display_clk_ctrl(display->dsi_clk_handle,
 			DSI_CORE_CLK, DSI_CLK_ON);
 	}
@@ -205,7 +223,8 @@ int dsi_display_aod_on(struct dsi_display *display) {
 			       display->name, rc);
 	}
 
-	if (display->config.panel_mode == DSI_OP_CMD_MODE) {
+	if (display->config.panel_mode == DSI_OP_CMD_MODE ||
+			display->panel->oppo_priv.is_aod_ramless) {
 	rc = dsi_display_clk_ctrl(display->dsi_clk_handle,
 				DSI_CORE_CLK, DSI_CLK_OFF);
 	}
@@ -222,8 +241,9 @@ int dsi_display_aod_off(struct dsi_display *display) {
 
 	mutex_lock(&display->display_lock);
 
-		/* enable the clk vote for CMD mode panels */
-	if (display->config.panel_mode == DSI_OP_CMD_MODE) {
+	/* RMX2170: gate clocks for both CMD and ramless VIDEO panels */
+	if (display->config.panel_mode == DSI_OP_CMD_MODE ||
+			display->panel->oppo_priv.is_aod_ramless) {
 		dsi_display_clk_ctrl(display->dsi_clk_handle,
 			DSI_CORE_CLK, DSI_CLK_ON);
 	}
@@ -234,7 +254,8 @@ int dsi_display_aod_off(struct dsi_display *display) {
 			       display->name, rc);
 	}
 
-	if (display->config.panel_mode == DSI_OP_CMD_MODE) {
+	if (display->config.panel_mode == DSI_OP_CMD_MODE ||
+			display->panel->oppo_priv.is_aod_ramless) {
 	rc = dsi_display_clk_ctrl(display->dsi_clk_handle,
 				DSI_CORE_CLK, DSI_CLK_OFF);
 	}
