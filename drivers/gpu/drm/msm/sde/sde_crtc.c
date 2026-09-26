@@ -5413,7 +5413,6 @@ static int sde_crtc_onscreenfinger_atomic_check(struct sde_crtc_state *cstate,
 	int fp_mode = oppo_onscreenfp_status;
 	int dimlayer_hbm = oppo_dimlayer_hbm;
 	int dimlayer_bl = 0;
-	bool dimlayer_is_top = false;
 	int i;
 
 	for (i = 0; i < cnt; i++) {
@@ -5427,6 +5426,9 @@ static int sde_crtc_onscreenfinger_atomic_check(struct sde_crtc_state *cstate,
 		if (pstates[i].sde_pstate)
 			pstates[i].sde_pstate->is_skip = false;
 	}
+
+	pr_info("[FOD_DBG] atomic_check: cnt=%d fp_idx=%d fppressed_idx=%d aod_idx=%d fp_mode=%d dimlayer_hbm=%d\n",
+		cnt, fp_index, fppressed_index, aod_index, fp_mode, dimlayer_hbm);
 
 	if (!is_dsi_panel(cstate->base.crtc))
 		return 0;
@@ -5455,7 +5457,9 @@ static int sde_crtc_onscreenfinger_atomic_check(struct sde_crtc_state *cstate,
 	}
 
 	if (fppressed_index >= 0) {
-		if (fp_mode == 0 && !dimlayer_hbm) {
+		if (fp_mode == 0) {
+			pr_info("[FOD_DBG] SKIP: fppressed plane idx=%d skipped fp_mode=0\n",
+				fppressed_index);
 			pstates[fppressed_index].sde_pstate->is_skip = true;
 			fppressed_index = -1;
 		}
@@ -5487,34 +5491,26 @@ static int sde_crtc_onscreenfinger_atomic_check(struct sde_crtc_state *cstate,
 
 		SDE_DEBUG("debug for get cstate->fingerprint_mode = %d\n", cstate->fingerprint_mode);
 
-		if (aod_index >= 0) {
-			if (zpos > pstates[aod_index].stage)
-				zpos = pstates[aod_index].stage;
-			pstates[aod_index].stage++;
+		/* find the min zpos in fp_index/fppressed_index stage to dim layer, then fp_index/fppressed_index stage increase one */
+		if (fp_index >= 0) {
+			if (zpos > pstates[fp_index].stage)
+				zpos = pstates[fp_index].stage;
 		}
 		if (fppressed_index >= 0) {
 			if (zpos > pstates[fppressed_index].stage)
 				zpos = pstates[fppressed_index].stage;
-			pstates[fppressed_index].stage++;
-		}
-		if (fp_index >= 0) {
-			if (zpos > pstates[fp_index].stage)
-				zpos = pstates[fp_index].stage;
-			pstates[fp_index].stage++;
 		}
 
+		/* increase zpos(sde stage) which is on the dim layer, stage which is under dim layer zpos preserve */
 		for (i = 0; i < cnt; i++) {
-			if (i == fp_index || i == fppressed_index ||
-			    i == aod_index)
-				continue;
 			if (pstates[i].stage >= zpos) {
 				pstates[i].stage++;
 			}
 		}
 
+		/* when no aod_index/fppressed_index/fp_index layer, dim layer's zpos is the most stage */
 		if (zpos == INT_MAX) {
 			zpos = 0;
-			dimlayer_is_top = true;
 			for (i = 0; i < cnt; i++) {
 				if (pstates[i].stage > zpos)
 					zpos = pstates[i].stage;
@@ -5523,30 +5519,29 @@ static int sde_crtc_onscreenfinger_atomic_check(struct sde_crtc_state *cstate,
 		}
 
 		SDE_EVT32(zpos, fp_index, aod_index, fppressed_index, cstate->num_dim_layers);
+		pr_info("[FOD_DBG] dim_cfg: zpos=%d fp=%d fppressed=%d aod=%d num_dim=%d\n",
+			zpos, fp_index, fppressed_index, aod_index, cstate->num_dim_layers);
 		if (sde_crtc_config_fingerprint_dim_layer(&cstate->base, zpos)) {
-			//SDE_ERROR("Failed to config dim layer\n");
-			if (dimlayer_is_top && !cstate->fingerprint_dim_layer) {
-				oppo_underbrightness_alpha = 0;
-				cstate->fingerprint_dim_layer = NULL;
-				cstate->fingerprint_mode = false;
-				cstate->fingerprint_pressed = false;
-				return 0;
-			}
-			SDE_EVT32(zpos, fp_index, aod_index, fppressed_index, cstate->num_dim_layers);
-			return -EINVAL;
+			pr_info("[FOD_DBG] dim_cfg FAILED zpos=%d - graceful skip\n", zpos);
+			// Dim layer failed or exceeds mixer blend stages, skip gracefully
+			cstate->fingerprint_dim_layer = NULL;
+			cstate->fingerprint_mode = false;
+			cstate->fingerprint_pressed = false;
+			return 0;
 		}
-#ifdef OPLUS_FEATURE_AOD_RAMLESS
-// Yuwei.Zhang@MULTIMEDIA.DISPLAY.LCD, 2020/09/25, sepolicy for aod ramless
-		if (fppressed_index >= 0 || dimlayer_hbm)
-#else
-		if (fppressed_index >= 0 || dimlayer_hbm)
-#endif /* OPLUS_FEATURE_AOD_RAMLESS */
+		if (fppressed_index >= 0)
 			cstate->fingerprint_pressed = true;
 		else
 			cstate->fingerprint_pressed = false;
 
+		pr_info("[FOD_DBG] RESULT: fp_pressed=%d fp_mode=%d dimlayer_hbm=%d fppressed_idx=%d\n",
+			cstate->fingerprint_pressed, cstate->fingerprint_mode,
+			dimlayer_hbm, fppressed_index);
+
 		SDE_DEBUG("debug for get cstate->fingerprint_pressed = %d\n", cstate->fingerprint_pressed);
 	} else {
+		pr_info("[FOD_DBG] INACTIVE: dimlayer_hbm=%d dimlayer_bl=%d clearing fp state\n",
+			dimlayer_hbm, dimlayer_bl);
 		oppo_underbrightness_alpha = 0;
 		cstate->fingerprint_dim_layer = NULL;
 		cstate->fingerprint_mode = false;

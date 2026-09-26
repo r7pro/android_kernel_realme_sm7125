@@ -4854,7 +4854,7 @@ static int sde_plane_atomic_set_property(struct drm_plane *plane,
 	struct sde_plane_state *pstate;
 	struct drm_property *fod_property;
 	int fod_val = 0;
-	int idx, ret = -EINVAL;
+	int idx, ret = -EINVAL, fod_ret = 0;
 
 	SDE_DEBUG_PLANE(psde, "\n");
 
@@ -4871,12 +4871,19 @@ static int sde_plane_atomic_set_property(struct drm_plane *plane,
 				val &= ~FOD_PRESSED_LAYER_ZORDER;
 				fod_val = 2; // pressed
 			}
+			pr_info("[FOD_DBG] set_prop ZPOS: raw_zpos=0x%x fod_val=%d (0=fp,2=pressed) plane=%s\n",
+				(unsigned int)(val | (fod_val == 2 ? FOD_PRESSED_LAYER_ZORDER : 0)),
+				fod_val, psde->pipe_name);
 
 			fod_property = psde->property_info.
 					property_array[PLANE_PROP_CUSTOM];
-			ret = msm_property_atomic_set(&psde->property_info,
+			fod_ret = msm_property_atomic_set(&psde->property_info,
 					&pstate->property_state,
 					fod_property, fod_val);
+			if (fod_ret) {
+				SDE_ERROR("failed to set fod prop\n");
+				return fod_ret;
+			}
 		}
 		ret = msm_property_atomic_set(&psde->property_info,
 				&pstate->property_state, property, val);

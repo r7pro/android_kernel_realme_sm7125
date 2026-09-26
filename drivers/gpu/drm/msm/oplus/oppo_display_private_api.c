@@ -1986,8 +1986,8 @@ static ssize_t oppo_display_set_dimlayer_hbm(struct device *dev,
 	oppo_dimlayer_hbm = value;
 #ifdef VENDOR_EDIT
 	/* Hu Jie@PSW.MM.Display.Lcd.Stability, 2019-09-27, add log at display key evevnt */
-	pr_err("debug for oppo_display_set_dimlayer_hbm set oppo_dimlayer_hbm = %d\n",
-		oppo_dimlayer_hbm);
+	pr_info("[FOD_DBG] set_dimlayer_hbm: oppo_dimlayer_hbm=%d (onscreenfp_status=%d)\n",
+		oppo_dimlayer_hbm, oppo_onscreenfp_status);
 #endif
 
 	return count;
@@ -2213,6 +2213,8 @@ static ssize_t oppo_display_notify_fp_press(struct device *dev,
 	}
 
 	oppo_onscreenfp_status = onscreenfp_status;
+	pr_info("[FOD_DBG] notify_fp_press: oppo_onscreenfp_status=%d (dimlayer_hbm=%d)\n",
+		oppo_onscreenfp_status, oppo_dimlayer_hbm);
 #ifdef OPLUS_FEATURE_AOD_RAMLESS
 /* Yuwei.Zhang@MULTIMEDIA.DISPLAY.LCD, 2020/09/25, sepolicy for aod ramless */
 	if((0==oppo_display_mode) && onscreenfp_status) {
@@ -2634,6 +2636,8 @@ int dsi_display_oppo_set_power(struct drm_connector *connector,
 			break;
 		}
 		set_oppo_display_power_status(OPPO_DISPLAY_POWER_DOZE);
+		pr_info("[FOD_DBG] power_LP1: force oppo_dimlayer_hbm=0 (was %d, onscreenfp=%d)\n",
+			oppo_dimlayer_hbm, oppo_onscreenfp_status);
 		oppo_dimlayer_hbm = 0;
 		break;
 	case SDE_MODE_DPMS_LP2:
@@ -2677,6 +2681,8 @@ int dsi_display_oppo_set_power(struct drm_connector *connector,
 			break;
 		}
 		set_oppo_display_power_status(OPPO_DISPLAY_POWER_DOZE_SUSPEND);
+		pr_info("[FOD_DBG] power_LP2: force oppo_dimlayer_hbm=0 (was %d, onscreenfp=%d)\n",
+			oppo_dimlayer_hbm, oppo_onscreenfp_status);
 		oppo_dimlayer_hbm = 0;
 		break;
 	case SDE_MODE_DPMS_ON:
