@@ -565,15 +565,18 @@ static void tp_gesture_handle(struct touchpanel_data *ts)
         notify_display_fpd(true);
 
         if (ts->input_dev) {
+            int raw_x = fp_x;
+            int raw_y = fp_y;
+            if (ts->resolution_info.LCD_WIDTH && ts->resolution_info.LCD_HEIGHT) {
+                raw_x = fp_x * ts->resolution_info.max_x / ts->resolution_info.LCD_WIDTH;
+                raw_y = fp_y * ts->resolution_info.max_y / ts->resolution_info.LCD_HEIGHT;
+            }
             input_mt_slot(ts->input_dev, 0);
             input_mt_report_slot_state(ts->input_dev, MT_TOOL_FINGER, 1);
             input_report_key(ts->input_dev, BTN_TOUCH, 1);
             input_report_key(ts->input_dev, BTN_TOOL_FINGER, 1);
-            input_report_abs(ts->input_dev, ABS_MT_POSITION_X, fp_x);
-            input_report_abs(ts->input_dev, ABS_MT_POSITION_Y, fp_y);
-            input_report_key(ts->input_dev, KEY_GESTURE_FP_DOWN, 1);
-            input_sync(ts->input_dev);
-            input_report_key(ts->input_dev, KEY_GESTURE_FP_DOWN, 0);
+            input_report_abs(ts->input_dev, ABS_MT_POSITION_X, raw_x);
+            input_report_abs(ts->input_dev, ABS_MT_POSITION_Y, raw_y);
             input_sync(ts->input_dev);
         }
     } else if (gesture_info_temp.gesture_type == FingerprintUp) {
@@ -594,9 +597,6 @@ static void tp_gesture_handle(struct touchpanel_data *ts)
             input_mt_report_slot_state(ts->input_dev, MT_TOOL_FINGER, 0);
             input_report_key(ts->input_dev, BTN_TOUCH, 0);
             input_report_key(ts->input_dev, BTN_TOOL_FINGER, 0);
-            input_report_key(ts->input_dev, KEY_GESTURE_FP_UP, 1);
-            input_sync(ts->input_dev);
-            input_report_key(ts->input_dev, KEY_GESTURE_FP_UP, 0);
             input_sync(ts->input_dev);
         }
     }
