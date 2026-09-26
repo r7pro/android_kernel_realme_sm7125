@@ -2595,9 +2595,49 @@ int dsi_display_oppo_set_power(struct drm_connector *connector,
 
 	switch (power_mode) {
 	case SDE_MODE_DPMS_LP1:
-	case SDE_MODE_DPMS_LP2:
-		switch(get_oppo_display_scene()) {
+		switch (get_oppo_display_scene()) {
+		case OPPO_DISPLAY_NORMAL_SCENE:
+		case OPPO_DISPLAY_NORMAL_HBM_SCENE:
+			rc = dsi_panel_set_lp1(display->panel);
+			set_oppo_display_scene(OPPO_DISPLAY_AOD_SCENE);
 			break;
+		case OPPO_DISPLAY_AOD_HBM_SCENE:
+			blank = MSM_DRM_BLANK_POWERDOWN;
+			notifier_data.data = &blank;
+			notifier_data.id = 0;
+
+			msm_drm_notifier_call_chain(MSM_DRM_EARLY_EVENT_BLANK,
+						    &notifier_data);
+
+			/* Skip aod off if fingerprintpress exist */
+			if (!sde_connector_get_fppress_mode(connector)) {
+				mutex_lock(&display->panel->panel_lock);
+				rc = dsi_panel_tx_cmd_set(display->panel, DSI_CMD_AOD_HBM_OFF);
+#ifdef OPLUS_FEATURE_AOD_RAMLESS
+/* Yuwei.Zhang@MULTIMEDIA.DISPLAY.LCD, 2020/09/25, sepolicy for aod ramless */
+				if (display->panel->oppo_priv.is_aod_ramless) {
+					oppo_update_aod_light_mode_unlock(display->panel);
+				}
+#endif /* OPLUS_FEATURE_AOD_RAMLESS */
+				mutex_unlock(&display->panel->panel_lock);
+				set_oppo_display_scene(OPPO_DISPLAY_AOD_SCENE);
+			}
+
+			msm_drm_notifier_call_chain(MSM_DRM_EVENT_BLANK,
+						    &notifier_data);
+			break;
+		case OPPO_DISPLAY_AOD_SCENE:
+			if (display->panel->power_mode == SDE_MODE_DPMS_LP2)
+				rc = dsi_panel_set_lp1(display->panel);
+			break;
+		default:
+			break;
+		}
+		set_oppo_display_power_status(OPPO_DISPLAY_POWER_DOZE);
+		oppo_dimlayer_hbm = 0;
+		break;
+	case SDE_MODE_DPMS_LP2:
+		switch (get_oppo_display_scene()) {
 		case OPPO_DISPLAY_NORMAL_SCENE:
 		case OPPO_DISPLAY_NORMAL_HBM_SCENE:
 			rc = dsi_panel_set_lp1(display->panel);
@@ -2628,8 +2668,11 @@ int dsi_display_oppo_set_power(struct drm_connector *connector,
 
 			msm_drm_notifier_call_chain(MSM_DRM_EVENT_BLANK,
 						    &notifier_data);
+			rc = dsi_panel_set_lp2(display->panel);
 			break;
 		case OPPO_DISPLAY_AOD_SCENE:
+			rc = dsi_panel_set_lp2(display->panel);
+			break;
 		default:
 			break;
 		}
@@ -2662,7 +2705,10 @@ int dsi_display_oppo_set_power(struct drm_connector *connector,
 			&notifier_data);
 		osc_count = 1;
 		break;
+	case SDE_MODE_DPMS_SUSPEND:
+	case SDE_MODE_DPMS_STANDBY:
 	case SDE_MODE_DPMS_OFF:
+		set_oppo_display_power_status(OPPO_DISPLAY_POWER_OFF);
 		osc_count = 0;
 		break;
 	default:
