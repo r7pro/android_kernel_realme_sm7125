@@ -735,6 +735,18 @@ static int _sde_connector_update_dirty_properties(
 					connector->state, CONNECTOR_PROP_LP);
 			_sde_connector_update_power_locked(c_conn);
 			mutex_unlock(&c_conn->lock);
+			/*
+			 * LP2 (DOZE_SUSPEND): disable encoder idle power collapse
+			 * so the SDE RSC stays in CLK_STATE and continues to
+			 * generate VSYNC interrupts.  Without this, the 1ms
+			 * IDLE_SHORT_TIMEOUT triggers SDE_RSC_IDLE_STATE which
+			 * stops hardware VSYNC, causing SurfaceFlinger present
+			 * fences to never signal and the display to freeze.
+			 * LP1/ON: re-enable idle-PC for normal power management.
+			 */
+			if (c_conn->encoder)
+				sde_encoder_control_idle_pc(c_conn->encoder,
+					c_conn->lp_mode != SDE_MODE_DPMS_LP2);
 			break;
 		case CONNECTOR_PROP_BL_SCALE:
 		case CONNECTOR_PROP_AD_BL_SCALE:
