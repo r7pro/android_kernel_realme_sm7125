@@ -41,6 +41,17 @@
 #include "touchpanel_healthinfo.h"
 #include "util_interface/touch_interfaces.h"
 
+#if defined(CONFIG_DRM_MSM) || defined(CONFIG_FB)
+enum oppo_display_power_status {
+    OPPO_DISPLAY_POWER_OFF = 0,
+    OPPO_DISPLAY_POWER_DOZE = 1,
+    OPPO_DISPLAY_POWER_ON = 2,
+    OPPO_DISPLAY_POWER_DOZE_SUSPEND = 3,
+    OPPO_DISPLAY_POWER_ON_UNKNOW = 4,
+};
+extern enum oppo_display_power_status get_oppo_display_power_status(void);
+#endif
+
 #if GESTURE_RATE_MODE
 #include "gesture_recon_rate.h"
 #endif
@@ -556,6 +567,12 @@ static void tp_gesture_handle(struct touchpanel_data *ts)
         }
         opticalfp_irq_handler(&ts->fp_info);
         notify_display_fpd(true);
+        if (ts->input_dev) {
+            input_report_key(ts->input_dev, KEY_GESTURE_FP_DOWN, 1);
+            input_sync(ts->input_dev);
+            input_report_key(ts->input_dev, KEY_GESTURE_FP_DOWN, 0);
+            input_sync(ts->input_dev);
+        }
     } else if (gesture_info_temp.gesture_type == FingerprintUp) {
         ts->fp_info.touch_state = 0;
         if (ts->screenoff_fingerprint_info_support) {
@@ -564,6 +581,12 @@ static void tp_gesture_handle(struct touchpanel_data *ts)
         }
         opticalfp_irq_handler(&ts->fp_info);
         notify_display_fpd(false);
+        if (ts->input_dev) {
+            input_report_key(ts->input_dev, KEY_GESTURE_FP_UP, 1);
+            input_sync(ts->input_dev);
+            input_report_key(ts->input_dev, KEY_GESTURE_FP_UP, 0);
+            input_sync(ts->input_dev);
+        }
     }
 }
 
@@ -1143,6 +1166,15 @@ static void tp_fingerprint_handle(struct touchpanel_data *ts)
         if (ts->health_monitor_v2_support) {
             tp_healthinfo_report(&ts->monitor_data_v2, HEALTH_FINGERPRINT, &fp_tpinfo.area_rate);
         }
+#if defined(CONFIG_DRM_MSM) || defined(CONFIG_FB)
+        if (get_oppo_display_power_status() == OPPO_DISPLAY_POWER_DOZE ||
+            get_oppo_display_power_status() == OPPO_DISPLAY_POWER_DOZE_SUSPEND) {
+            input_report_key(ts->input_dev, KEY_GESTURE_FP_DOWN, 1);
+            input_sync(ts->input_dev);
+            input_report_key(ts->input_dev, KEY_GESTURE_FP_DOWN, 0);
+            input_sync(ts->input_dev);
+        }
+#endif
     } else if(fp_tpinfo.touch_state == FINGERPRINT_UP_DETECT) {
         TPD_INFO("screen on up : (%d, %d)\n", ts->fp_info.x, ts->fp_info.y);
         ts->fp_info.touch_state = 0;
@@ -5356,6 +5388,8 @@ static int init_input_device(struct touchpanel_data *ts)
         set_bit(KEY_GESTURE_SWIPE_RIGHT, ts->input_dev->keybit);
         set_bit(KEY_GESTURE_SWIPE_UP, ts->input_dev->keybit);
         set_bit(KEY_GESTURE_SINGLE_TAP, ts->input_dev->keybit);
+        set_bit(KEY_GESTURE_FP_DOWN, ts->input_dev->keybit);
+        set_bit(KEY_GESTURE_FP_UP, ts->input_dev->keybit);
     }
 
     ts->kpd_input_dev->name = TPD_DEVICE"_kpd";
@@ -6763,7 +6797,7 @@ void touchpanel_enter_aod(void)
 {
     struct touchpanel_data *ts = g_tp;
 
-    if (!ts || !ts->black_gesture_support || !(ts->gesture_enable & 0x01))
+    if (!ts || !ts->black_gesture_support || (!(ts->gesture_enable & 0x01) && !ts->fp_enable))
         return;
 
     if (ts->is_suspended) {
