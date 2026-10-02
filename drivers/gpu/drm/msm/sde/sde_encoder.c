@@ -2526,10 +2526,7 @@ static int sde_encoder_resource_control(struct drm_encoder *drm_enc,
 		else
 			lp = SDE_MODE_DPMS_ON;
 
-		if (lp == SDE_MODE_DPMS_LP2)
-			idle_pc_duration = IDLE_SHORT_TIMEOUT;
-		else
-			idle_pc_duration = IDLE_POWERCOLLAPSE_DURATION;
+		idle_pc_duration = IDLE_POWERCOLLAPSE_DURATION;
 
 		if (!autorefresh_enabled)
 			kthread_mod_delayed_work(
